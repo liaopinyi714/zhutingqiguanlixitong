@@ -63,7 +63,20 @@ app.post('/api/logout', async (c) => {
   deleteCookie(c, 'hearing_session', { path: '/' });
   return c.json({ ok: true });
 });
-const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date });
+const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date, contactPhone: r.contact_phone });
+async function normalizeFitting(db: D1Database, tenant: string, data: any) {
+  if (!data.deviceModelId) return data;
+  const selected = await db
+    .prepare(
+      `SELECT m.name model,s.name series,b.name brand
+     FROM device_models m JOIN device_series s ON s.id=m.series_id AND s.tenant_id=m.tenant_id
+     JOIN device_brands b ON b.id=s.brand_id AND b.tenant_id=s.tenant_id
+     WHERE m.id=? AND m.tenant_id=? AND m.active=1 AND s.active=1 AND b.active=1`,
+    )
+    .bind(data.deviceModelId, tenant)
+    .first<{ brand: string; series: string; model: string }>();
+  return selected ? { ...data, ...selected } : null;
+}
 const catalogTables = {
   brands: { table: 'device_brands', max: 50, parent: '' },
   series: { table: 'device_series', max: 80, parent: 'brand_id' },
@@ -251,11 +264,12 @@ app.get('/api/search', async (c) => {
     SELECT c.* FROM customers c
     WHERE c.tenant_id=? AND (
       c.name LIKE ? ESCAPE '!' OR c.phone LIKE ? ESCAPE '!' OR
-      c.contact LIKE ? ESCAPE '!' OR c.source LIKE ? ESCAPE '!' OR
+      c.contact LIKE ? ESCAPE '!' OR c.contact_phone LIKE ? ESCAPE '!' OR
+      c.address LIKE ? ESCAPE '!' OR c.source LIKE ? ESCAPE '!' OR
       c.history LIKE ? ESCAPE '!' OR c.needs LIKE ? ESCAPE '!' OR
-      EXISTS (SELECT 1 FROM exams e WHERE e.customer_id=c.id AND e.tenant_id=c.tenant_id AND
+      EXISTS (SELECT 1 FROM exams e WHERE e.customer_id=c.id AND e.tenant_id=c.tenant_id AND e.deleted_at IS NULL AND
         (json_extract(e.data,'$.speech') LIKE ? ESCAPE '!' OR json_extract(e.data,'$.other') LIKE ? ESCAPE '!' OR json_extract(e.data,'$.conclusion') LIKE ? ESCAPE '!')) OR
-      EXISTS (SELECT 1 FROM fittings f WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id AND
+      EXISTS (SELECT 1 FROM fittings f WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id AND f.deleted_at IS NULL AND
         (json_extract(f.data,'$.brand') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.series') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.model') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.serial') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.notes') LIKE ? ESCAPE '!')) OR
       EXISTS (SELECT 1 FROM followups u WHERE u.customer_id=c.id AND u.tenant_id=c.tenant_id AND
         (u.type LIKE ? ESCAPE '!' OR u.note LIKE ? ESCAPE '!' OR u.result LIKE ? ESCAPE '!'))
@@ -264,7 +278,7 @@ app.get('/api/search', async (c) => {
       c.created_at DESC LIMIT 50
   `,
   )
-    .bind(c.get('session').tenant_id, ...Array(19).fill(pattern))
+    .bind(c.get('session').tenant_id, ...Array(21).fill(pattern))
     .all();
   return c.json(rows.results.map(mapCustomer));
 });
@@ -276,7 +290,7 @@ app.post('/api/customers', async (c) => {
     key = id();
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ).bind(
       key,
       s.tenant_id,
@@ -285,6 +299,8 @@ app.post('/api/customers', async (c) => {
       d.birthDate,
       d.phone,
       d.contact,
+      d.contactPhone,
+      d.address,
       d.source,
       d.status,
       d.history,
@@ -295,6 +311,80 @@ app.post('/api/customers', async (c) => {
     ).bind(id(), s.tenant_id, s.role, '创建客户档案', key),
   ]);
   return c.json({ id: key }, 201);
+});
+app.post('/api/intakes', async (c) => {
+  const parsed = z
+    .object({
+      customer: customerSchema,
+      exam: examSchema.optional(),
+      fitting: fittingSchema.optional(),
+      followup: followupSchema.optional(),
+    })
+    .safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: '建档内容不完整，请检查必填项目' }, 400);
+  const s = c.get('session'),
+    d = parsed.data;
+  if ((d.exam || d.fitting) && !canWrite(s.role, 'exam'))
+    return c.json({ error: '当前角色无权录入听力检查和验配' }, 403);
+  const fitting = d.fitting ? await normalizeFitting(c.env.DB, s.tenant_id, d.fitting) : null;
+  if (d.fitting && !fitting) return c.json({ error: '所选型号不存在或已停用' }, 400);
+  const customerId = id(),
+    p = d.customer;
+  const statements = [
+    c.env.DB.prepare(
+      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    ).bind(
+      customerId,
+      s.tenant_id,
+      p.name,
+      p.gender,
+      p.birthDate,
+      p.phone,
+      p.contact,
+      p.contactPhone,
+      p.address,
+      p.source,
+      p.status,
+      p.history,
+      p.needs,
+    ),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '创建客户档案', customerId),
+  ];
+  if (d.exam) {
+    statements.push(
+      c.env.DB.prepare(
+        'INSERT INTO exams(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, customerId, d.exam.date, JSON.stringify(d.exam)),
+    );
+    statements.push(
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, s.role, '建档时录入听力检查', customerId),
+    );
+  }
+  if (fitting) {
+    statements.push(
+      c.env.DB.prepare(
+        'INSERT INTO fittings(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, customerId, fitting.date, JSON.stringify(fitting)),
+    );
+    statements.push(
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, s.role, '建档时录入验配', customerId),
+    );
+  }
+  if (d.followup) {
+    statements.push(
+      c.env.DB.prepare(
+        'INSERT INTO followups(id,tenant_id,customer_id,due,type,note) VALUES(?,?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, customerId, d.followup.due, d.followup.type, d.followup.note),
+    );
+  }
+  await c.env.DB.batch(statements);
+  return c.json({ id: customerId }, 201);
 });
 app.use('/api/customers/:id/*', async (c, next) => {
   const r = await c.env.DB.prepare('SELECT id FROM customers WHERE id=? AND tenant_id=?')
@@ -309,7 +399,7 @@ app.get('/api/customers/:id/detail', async (c) => {
   const result = await c.env.DB.batch(
     ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table) =>
       c.env.DB.prepare(
-        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
+        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ${['exams', 'fittings'].includes(table) ? 'AND deleted_at IS NULL' : ''} ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
       ).bind(t, k),
     ),
   );
@@ -330,13 +420,15 @@ app.put('/api/customers/:id/profile', async (c) => {
     k = c.req.param('id');
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE customers SET name=?,gender=?,birth_date=?,phone=?,contact=?,source=?,status=?,history=?,needs=? WHERE id=? AND tenant_id=?',
+      'UPDATE customers SET name=?,gender=?,birth_date=?,phone=?,contact=?,contact_phone=?,address=?,source=?,status=?,history=?,needs=? WHERE id=? AND tenant_id=?',
     ).bind(
       d.name,
       d.gender,
       d.birthDate,
       d.phone,
       d.contact,
+      d.contactPhone,
+      d.address,
       d.source,
       d.status,
       d.history,
@@ -364,16 +456,9 @@ for (const [path, schema, resource, label] of [
       k = id(),
       customer = c.req.param('id');
     if (path === 'fittings' && d.deviceModelId) {
-      const selected = await c.env.DB.prepare(
-        `SELECT m.name model,s.name series,b.name brand
-        FROM device_models m JOIN device_series s ON s.id=m.series_id AND s.tenant_id=m.tenant_id
-        JOIN device_brands b ON b.id=s.brand_id AND b.tenant_id=s.tenant_id
-        WHERE m.id=? AND m.tenant_id=? AND m.active=1 AND s.active=1 AND b.active=1`,
-      )
-        .bind(d.deviceModelId, s.tenant_id)
-        .first<{ brand: string; series: string; model: string }>();
-      if (!selected) return c.json({ error: '所选型号不存在或已停用' }, 400);
-      Object.assign(d, selected);
+      const normalized = await normalizeFitting(c.env.DB, s.tenant_id, d);
+      if (!normalized) return c.json({ error: '所选型号不存在或已停用' }, 400);
+      Object.assign(d, normalized);
     }
     const statement =
       path === 'followups'
@@ -392,6 +477,92 @@ for (const [path, schema, resource, label] of [
     return c.json({ id: k }, 201);
   });
 }
+app.get('/api/customers/:id/removed', async (c) => {
+  const tenant = c.get('session').tenant_id,
+    customer = c.req.param('id');
+  const [exams, fittings] = await c.env.DB.batch([
+    c.env.DB.prepare(
+      'SELECT id,date,data,deleted_at FROM exams WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+    ).bind(tenant, customer),
+    c.env.DB.prepare(
+      'SELECT id,date,data,deleted_at FROM fittings WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+    ).bind(tenant, customer),
+  ]);
+  return c.json({
+    exams: exams.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
+    fittings: fittings.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
+  });
+});
+for (const kind of ['exams', 'fittings'] as const) {
+  app.delete(`/api/customers/:id/${kind}/:recordId`, async (c) => {
+    const s = c.get('session'),
+      customer = c.req.param('id'),
+      record = c.req.param('recordId');
+    if (!canWrite(s.role, kind === 'exams' ? 'exam' : 'fitting'))
+      return c.json({ error: '当前角色无权删除专业记录' }, 403);
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM ${kind} WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL`,
+    )
+      .bind(record, customer, s.tenant_id)
+      .first();
+    if (!existing) return c.json({ error: '记录不存在或已删除' }, 404);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE ${kind} SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND customer_id=? AND tenant_id=?`,
+      ).bind(record, customer, s.tenant_id),
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(
+        id(),
+        s.tenant_id,
+        s.role,
+        kind === 'exams' ? '删除听力检查记录' : '删除验配记录',
+        customer,
+      ),
+    ]);
+    return c.json({ ok: true });
+  });
+  app.post(`/api/customers/:id/${kind}/:recordId/restore`, async (c) => {
+    const s = c.get('session'),
+      customer = c.req.param('id'),
+      record = c.req.param('recordId');
+    if (!canWrite(s.role, kind === 'exams' ? 'exam' : 'fitting'))
+      return c.json({ error: '当前角色无权恢复专业记录' }, 403);
+    const existing = await c.env.DB.prepare(
+      `SELECT id FROM ${kind} WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL`,
+    )
+      .bind(record, customer, s.tenant_id)
+      .first();
+    if (!existing) return c.json({ error: '已删除记录不存在' }, 404);
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        `UPDATE ${kind} SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=?`,
+      ).bind(record, customer, s.tenant_id),
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(
+        id(),
+        s.tenant_id,
+        s.role,
+        kind === 'exams' ? '恢复听力检查记录' : '恢复验配记录',
+        customer,
+      ),
+    ]);
+    return c.json({ ok: true });
+  });
+}
+app.get('/api/warranties', async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT f.id,f.customer_id,c.name,c.phone,f.data
+    FROM fittings f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id
+    WHERE f.tenant_id=? AND f.deleted_at IS NULL ORDER BY f.date DESC`,
+  )
+    .bind(c.get('session').tenant_id)
+    .all();
+  return c.json(
+    rows.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })).filter((r: any) => r.warranty),
+  );
+});
 app.get('/api/followups', async (c) => {
   const r = await c.env.DB.prepare(
     'SELECT f.*,c.name,c.phone FROM followups f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id WHERE f.tenant_id=? ORDER BY f.completed,f.due',

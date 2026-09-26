@@ -33,6 +33,8 @@ type Customer = {
   birthDate: string;
   phone: string;
   contact: string;
+  contactPhone: string;
+  address: string;
   source: string;
   status: string;
   history: string;
@@ -88,6 +90,10 @@ const age = (date: string) => {
   );
 };
 const money = (n: number) => new Intl.NumberFormat('zh-CN').format(n);
+const daysUntil = (date: string) =>
+  Math.round(
+    (new Date(date + 'T00:00:00').getTime() - new Date(today() + 'T00:00:00').getTime()) / 86400000,
+  );
 const localTime = (value: string) =>
   new Date(value.includes('T') ? value : value.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {
     hour12: false,
@@ -561,15 +567,553 @@ function DeviceCatalogManager({
   );
 }
 
+const blankCurve = () =>
+  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
+
+function IntakePage({
+  catalog,
+  role,
+  onSave,
+  onCancel,
+}: {
+  catalog: DeviceCatalog;
+  role: string;
+  onSave: (payload: { customer: any; exam?: Exam; fitting?: any; followup?: any }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [profile, setProfile] = useState({
+    name: '',
+    gender: '未填写',
+    birthDate: '',
+    phone: '',
+    address: '',
+    contact: '',
+    contactPhone: '',
+    source: '自然到店',
+    status: '待评估',
+    history: '',
+    needs: '',
+  });
+  const [examEnabled, setExamEnabled] = useState(false);
+  const [exam, setExam] = useState<Exam>({
+    date: today(),
+    right: blankCurve(),
+    left: blankCurve(),
+    boneRight: blankCurve(),
+    boneLeft: blankCurve(),
+    speech: '',
+    other: '',
+    conclusion: '',
+  });
+  const [fittingEnabled, setFittingEnabled] = useState(false);
+  const [brandId, setBrandId] = useState('');
+  const [seriesId, setSeriesId] = useState('');
+  const [modelId, setModelId] = useState('');
+  const [fitting, setFitting] = useState({
+    date: today(),
+    side: '双耳',
+    serial: '',
+    amount: 0,
+    warranty: '',
+    notes: '',
+  });
+  const [followupEnabled, setFollowupEnabled] = useState(false);
+  const [followup, setFollowup] = useState({ due: today(), type: '适应回访', note: '' });
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
+  const series = catalog.series.filter((item) => item.brand_id === brandId);
+  const models = catalog.models.filter((item) => item.series_id === seriesId);
+  const setPoint = (
+    key: 'right' | 'left' | 'boneRight' | 'boneLeft',
+    index: number,
+    patch: Partial<Point>,
+  ) =>
+    setExam((current) => ({
+      ...current,
+      [key]: current[key].map((point, i) => (i === index ? { ...point, ...patch } : point)),
+    }));
+  async function submitIntake(event: FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setFormError('');
+    try {
+      const brand = catalog.brands.find((item) => item.id === brandId);
+      const selectedSeries = catalog.series.find((item) => item.id === seriesId);
+      const model = catalog.models.find((item) => item.id === modelId);
+      if (fittingEnabled && (!brand || !selectedSeries || !model))
+        throw new Error('请完整选择助听器品牌、系列和型号');
+      await onSave({
+        customer: profile,
+        ...(examEnabled ? { exam } : {}),
+        ...(fittingEnabled
+          ? {
+              fitting: {
+                ...fitting,
+                amount: Number(fitting.amount),
+                deviceModelId: modelId,
+                brand: brand!.name,
+                series: selectedSeries!.name,
+                model: model!.name,
+              },
+            }
+          : {}),
+        ...(followupEnabled ? { followup } : {}),
+      });
+    } catch (reason) {
+      setFormError((reason as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+  return (
+    <div className="intake-page">
+      <div className="page-heading">
+        <div>
+          <span className="eyebrow">客户建档</span>
+          <h1>新建客户档案</h1>
+          <p>在同一页完成基本资料、听力检查、验配与首次随访；未勾选的部分可稍后补充。</p>
+        </div>
+        <button className="button" type="button" onClick={onCancel}>
+          返回客户列表
+        </button>
+      </div>
+      <form onSubmit={submitIntake}>
+        {formError && (
+          <div className="error" role="alert">
+            {formError}
+          </div>
+        )}
+        <section className="panel padded intake-section">
+          <div className="section-title">
+            <div>
+              <span className="eyebrow">01 · 必填</span>
+              <h2>基本资料</h2>
+            </div>
+            <Users size={20} />
+          </div>
+          <div className="form-grid">
+            <Field label="客户姓名 *">
+              <input
+                required
+                maxLength={40}
+                value={profile.name}
+                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+              />
+            </Field>
+            <Field label="性别">
+              <select
+                value={profile.gender}
+                onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
+              >
+                {['未填写', '男', '女'].map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="出生日期 *">
+              <input
+                type="date"
+                required
+                min="1900-01-01"
+                max={today()}
+                value={profile.birthDate}
+                onChange={(e) => setProfile({ ...profile, birthDate: e.target.value })}
+              />
+            </Field>
+            <Field label="客户电话">
+              <input
+                maxLength={30}
+                value={profile.phone}
+                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
+                placeholder="演示时请使用虚构号码"
+              />
+            </Field>
+            <Field label="住址" wide>
+              <input
+                maxLength={300}
+                value={profile.address}
+                onChange={(e) => setProfile({ ...profile, address: e.target.value })}
+                placeholder="省、市、区及详细地址"
+              />
+            </Field>
+            <Field label="其他联系人姓名 / 关系">
+              <input
+                maxLength={100}
+                value={profile.contact}
+                onChange={(e) => setProfile({ ...profile, contact: e.target.value })}
+              />
+            </Field>
+            <Field label="其他联系人电话">
+              <input
+                maxLength={30}
+                value={profile.contactPhone}
+                onChange={(e) => setProfile({ ...profile, contactPhone: e.target.value })}
+              />
+            </Field>
+            <Field label="客户来源">
+              <select
+                value={profile.source}
+                onChange={(e) => setProfile({ ...profile, source: e.target.value })}
+              >
+                {['自然到店', '老客转介绍', '社区活动', '线上咨询', '其他'].map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="服务阶段">
+              <select
+                value={profile.status}
+                onChange={(e) => setProfile({ ...profile, status: e.target.value })}
+              >
+                {statuses.slice(1).map((v) => (
+                  <option key={v}>{v}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="听力与健康情况" wide>
+              <textarea
+                value={profile.history}
+                onChange={(e) => setProfile({ ...profile, history: e.target.value })}
+                placeholder="主诉、耳部病史、既往助听器使用情况…"
+              />
+            </Field>
+            <Field label="聆听需求与期望" wide>
+              <textarea
+                value={profile.needs}
+                onChange={(e) => setProfile({ ...profile, needs: e.target.value })}
+              />
+            </Field>
+          </div>
+        </section>
+        {role !== '前台' && (
+          <section className="panel padded intake-section">
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">02 · 可选</span>
+                <h2>听力检查与听力图</h2>
+              </div>
+              <label className="intake-toggle">
+                <input
+                  type="checkbox"
+                  checked={examEnabled}
+                  onChange={(e) => setExamEnabled(e.target.checked)}
+                />{' '}
+                同时录入
+              </label>
+            </div>
+            {examEnabled ? (
+              <>
+                <div className="form-grid">
+                  <Field label="检查日期 *">
+                    <input
+                      type="date"
+                      required
+                      max={today()}
+                      value={exam.date}
+                      onChange={(e) => setExam({ ...exam, date: e.target.value })}
+                    />
+                  </Field>
+                </div>
+                <p className="form-hint">
+                  听阈范围 −10 至 120 dB HL。留空表示未测；掩蔽和无反应按测点单独标记。
+                </p>
+                <div className="threshold-scroll">
+                  <table className="threshold-table">
+                    <thead>
+                      <tr>
+                        <th>频率 Hz</th>
+                        {frequencies.map((frequency) => (
+                          <th key={frequency}>{frequency}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(
+                        [
+                          ['right', '右耳气导'],
+                          ['left', '左耳气导'],
+                          ['boneRight', '右耳骨导'],
+                          ['boneLeft', '左耳骨导'],
+                        ] as const
+                      ).map(([key, label]) => (
+                        <tr key={key}>
+                          <th
+                            className={
+                              key.toLowerCase().includes('right') ? 'ear-right' : 'ear-left'
+                            }
+                          >
+                            {label}
+                          </th>
+                          {exam[key].map((point, index) => (
+                            <td key={point.frequency}>
+                              <input
+                                aria-label={`${label} ${point.frequency} Hz`}
+                                type="number"
+                                min="-10"
+                                max="120"
+                                step="5"
+                                value={point.value ?? ''}
+                                onChange={(e) =>
+                                  setPoint(key, index, {
+                                    value: e.target.value === '' ? null : Number(e.target.value),
+                                    noResponse: e.target.value === '' ? false : point.noResponse,
+                                  })
+                                }
+                              />
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${label} ${point.frequency} 掩蔽`}
+                                  checked={point.masked}
+                                  onChange={(e) =>
+                                    setPoint(key, index, { masked: e.target.checked })
+                                  }
+                                />
+                                掩蔽
+                              </label>
+                              <label>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${label} ${point.frequency} 无反应`}
+                                  checked={point.noResponse}
+                                  disabled={point.value === null}
+                                  onChange={(e) =>
+                                    setPoint(key, index, { noResponse: e.target.checked })
+                                  }
+                                />
+                                无反应
+                              </label>
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="intake-chart">
+                  <Audiogram exam={exam} />
+                </div>
+                <div className="form-grid">
+                  <Field label="言语测听" wide>
+                    <textarea
+                      value={exam.speech}
+                      onChange={(e) => setExam({ ...exam, speech: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="其他检查结果" wide>
+                    <textarea
+                      value={exam.other}
+                      onChange={(e) => setExam({ ...exam, other: e.target.value })}
+                    />
+                  </Field>
+                  <Field label="检查结论与建议 *" wide>
+                    <textarea
+                      required
+                      value={exam.conclusion}
+                      onChange={(e) => setExam({ ...exam, conclusion: e.target.value })}
+                    />
+                  </Field>
+                </div>
+              </>
+            ) : (
+              <p className="muted">勾选后可输入左右耳气导、骨导，实时查看听力图并填写检查结果。</p>
+            )}
+          </section>
+        )}
+        {role !== '前台' && (
+          <section className="panel padded intake-section">
+            <div className="section-title">
+              <div>
+                <span className="eyebrow">03 · 可选</span>
+                <h2>验配信息</h2>
+              </div>
+              <label className="intake-toggle">
+                <input
+                  type="checkbox"
+                  checked={fittingEnabled}
+                  onChange={(e) => setFittingEnabled(e.target.checked)}
+                />{' '}
+                同时录入
+              </label>
+            </div>
+            {fittingEnabled ? (
+              <div className="form-grid">
+                <Field label="验配日期 *">
+                  <input
+                    type="date"
+                    required
+                    max={today()}
+                    value={fitting.date}
+                    onChange={(e) => setFitting({ ...fitting, date: e.target.value })}
+                  />
+                </Field>
+                <Field label="佩戴耳侧">
+                  <select
+                    value={fitting.side}
+                    onChange={(e) => setFitting({ ...fitting, side: e.target.value })}
+                  >
+                    {['双耳', '左耳', '右耳'].map((v) => (
+                      <option key={v}>{v}</option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="品牌 *">
+                  <select
+                    required
+                    value={brandId}
+                    onChange={(e) => {
+                      setBrandId(e.target.value);
+                      setSeriesId('');
+                      setModelId('');
+                    }}
+                  >
+                    <option value="">选择品牌</option>
+                    {catalog.brands.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="系列 *">
+                  <select
+                    required
+                    value={seriesId}
+                    onChange={(e) => {
+                      setSeriesId(e.target.value);
+                      setModelId('');
+                    }}
+                  >
+                    <option value="">选择系列</option>
+                    {series.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="型号 *">
+                  <select required value={modelId} onChange={(e) => setModelId(e.target.value)}>
+                    <option value="">选择型号</option>
+                    {models.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+                <Field label="设备序列号">
+                  <input
+                    maxLength={100}
+                    value={fitting.serial}
+                    onChange={(e) => setFitting({ ...fitting, serial: e.target.value })}
+                  />
+                </Field>
+                <Field label="成交金额（元）">
+                  <input
+                    type="number"
+                    min="0"
+                    max="10000000"
+                    step="0.01"
+                    value={fitting.amount}
+                    onChange={(e) => setFitting({ ...fitting, amount: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field label="保修截止日期">
+                  <input
+                    type="date"
+                    value={fitting.warranty}
+                    onChange={(e) => setFitting({ ...fitting, warranty: e.target.value })}
+                  />
+                </Field>
+                <Field label="调试、验证与交付说明 *" wide>
+                  <textarea
+                    required
+                    value={fitting.notes}
+                    onChange={(e) => setFitting({ ...fitting, notes: e.target.value })}
+                  />
+                </Field>
+              </div>
+            ) : (
+              <p className="muted">勾选后从门店型号字典选择设备，并填写保修、调试和交付信息。</p>
+            )}
+          </section>
+        )}
+        <section className="panel padded intake-section">
+          <div className="section-title">
+            <div>
+              <span className="eyebrow">04 · 可选</span>
+              <h2>首次随访计划</h2>
+            </div>
+            <label className="intake-toggle">
+              <input
+                type="checkbox"
+                checked={followupEnabled}
+                onChange={(e) => setFollowupEnabled(e.target.checked)}
+              />{' '}
+              同时安排
+            </label>
+          </div>
+          {followupEnabled ? (
+            <div className="form-grid">
+              <Field label="计划日期 *">
+                <input
+                  type="date"
+                  required
+                  value={followup.due}
+                  onChange={(e) => setFollowup({ ...followup, due: e.target.value })}
+                />
+              </Field>
+              <Field label="服务类型">
+                <select
+                  value={followup.type}
+                  onChange={(e) => setFollowup({ ...followup, type: e.target.value })}
+                >
+                  {['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="计划内容 *" wide>
+                <textarea
+                  required
+                  value={followup.note}
+                  onChange={(e) => setFollowup({ ...followup, note: e.target.value })}
+                />
+              </Field>
+            </div>
+          ) : (
+            <p className="muted">可在建档时安排首次回访，也可稍后从客户档案中补充。</p>
+          )}
+        </section>
+        <div className="intake-actions">
+          <span>所有已勾选部分将一次保存到同一位客户档案。</span>
+          <button type="button" className="button" onClick={onCancel}>
+            取消
+          </button>
+          <button type="submit" className="button primary" disabled={saving}>
+            {saving ? '保存中…' : '保存完整档案'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
 export default function App() {
   const [role, setRole] = useState(''),
     [boot, setBoot] = useState(true),
     [page, setPage] = useState('overview'),
     [customers, setCustomers] = useState<Customer[]>([]),
+    [warranties, setWarranties] = useState<any[]>([]),
     [catalog, setCatalog] = useState<DeviceCatalog>({ brands: [], series: [], models: [] }),
     [followups, setFollowups] = useState<Follow[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
+    [removed, setRemoved] = useState<{ exams: any[]; fittings: any[] }>({
+      exams: [],
+      fittings: [],
+    }),
     [tab, setTab] = useState('概览'),
     [search, setSearch] = useState(''),
     [searchOpen, setSearchOpen] = useState(false),
@@ -592,20 +1136,25 @@ export default function App() {
     pending = followups.filter((f) => !f.completed),
     overdue = pending.filter((f) => f.due < today()),
     todayTasks = pending.filter((f) => f.due === today()),
-    fitted = customers.filter((c) => ['已验配', '长期随访'].includes(c.status));
+    fitted = customers.filter((c) => ['已验配', '长期随访'].includes(c.status)),
+    warrantyAlerts = warranties
+      .filter((item) => item.warranty && daysUntil(item.warranty) <= 90)
+      .sort((a, b) => a.warranty.localeCompare(b.warranty));
   const flash = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3500);
   };
   async function refresh() {
-    const [a, b, devices] = await Promise.all([
+    const [a, b, devices, warrantyRows] = await Promise.all([
       api('/customers'),
       api('/followups'),
       api('/device-catalog'),
+      api('/warranties'),
     ]);
     setCustomers(a);
     setFollowups(b);
     setCatalog(devices);
+    setWarranties(warrantyRows);
   }
   async function refreshCatalog() {
     setCatalog(await api('/device-catalog'));
@@ -613,7 +1162,12 @@ export default function App() {
   async function loadDetail(key: string) {
     setDetail(null);
     try {
-      setDetail(await api(`/customers/${key}/detail`));
+      const [data, removedRows] = await Promise.all([
+        api(`/customers/${key}/detail`),
+        api(`/customers/${key}/removed`),
+      ]);
+      setDetail(data);
+      setRemoved(removedRows);
     } catch (e) {
       setError((e as Error).message);
     }
@@ -631,9 +1185,12 @@ export default function App() {
     let cancelled = false;
     if (selected) {
       setDetail(null);
-      api(`/customers/${selected}/detail`)
-        .then((data) => {
-          if (!cancelled) setDetail(data);
+      Promise.all([api(`/customers/${selected}/detail`), api(`/customers/${selected}/removed`)])
+        .then(([data, removedRows]) => {
+          if (!cancelled) {
+            setDetail(data);
+            setRemoved(removedRows);
+          }
         })
         .catch((e) => {
           if (!cancelled) setError(e.message);
@@ -716,6 +1273,10 @@ export default function App() {
     }
   }
   function openForm(kind: string, record?: any) {
+    if (kind === 'customer' && !record) {
+      navigate('intake');
+      return;
+    }
     setError('');
     if (kind === 'customer')
       setDraft(
@@ -727,6 +1288,8 @@ export default function App() {
               birthDate: '1960-01-01',
               phone: '',
               contact: '',
+              contactPhone: '',
+              address: '',
               source: '自然到店',
               status: '待评估',
               history: '',
@@ -774,6 +1337,40 @@ export default function App() {
   }
   function change(key: string, value: any) {
     setDraft((d: any) => ({ ...d, [key]: value }));
+  }
+  async function saveIntake(payload: {
+    customer: any;
+    exam?: Exam;
+    fitting?: any;
+    followup?: any;
+  }) {
+    const created = await api('/intakes', 'POST', payload);
+    await refresh();
+    openCustomer(created.id);
+    flash('客户档案及所选服务记录已保存');
+  }
+  async function changeRecord(kind: 'exams' | 'fittings', recordId: string, restore = false) {
+    if (!selected) return;
+    if (
+      !restore &&
+      !window.confirm('确认删除这条记录？删除后不会出现在档案和统计中，可在本页恢复。')
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/customers/${selected}/${kind}/${recordId}${restore ? '/restore' : ''}`,
+        restore ? 'POST' : 'DELETE',
+      );
+      await Promise.all([loadDetail(selected), refresh()]);
+      setExamIndex(0);
+      flash(restore ? '记录已恢复' : '记录已删除，可在本页恢复');
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
   }
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -991,7 +1588,9 @@ export default function App() {
               </td>
               <td>
                 <span>{c.phone || '未填写'}</span>
-                <small className="subtext">{c.contact || '暂无其他联系人'}</small>
+                <small className="subtext">
+                  {[c.contact, c.contactPhone].filter(Boolean).join(' · ') || '暂无其他联系人'}
+                </small>
               </td>
               <td>
                 <Badge status={c.status} />
@@ -1110,7 +1709,7 @@ export default function App() {
         <header className="topbar">
           <div className="breadcrumb">
             门店管理 <ChevronRight size={14} />{' '}
-            <strong>{navs.find((n) => n[0] === page)?.[1]}</strong>
+            <strong>{page === 'intake' ? '新建客户' : navs.find((n) => n[0] === page)?.[1]}</strong>
             {customer && (
               <>
                 <ChevronRight size={14} />
@@ -1142,6 +1741,14 @@ export default function App() {
                 <X size={16} />
               </button>
             </div>
+          )}
+          {page === 'intake' && (
+            <IntakePage
+              catalog={catalog}
+              role={role}
+              onSave={saveIntake}
+              onCancel={() => navigate('customers')}
+            />
           )}
           {page === 'overview' && (
             <>
@@ -1443,6 +2050,14 @@ export default function App() {
                               <dd>{customer.contact || '未填写'}</dd>
                             </div>
                             <div>
+                              <dt>其他联系人电话</dt>
+                              <dd>{customer.contactPhone || '未填写'}</dd>
+                            </div>
+                            <div>
+                              <dt>住址</dt>
+                              <dd>{customer.address || '未填写'}</dd>
+                            </div>
+                            <div>
                               <dt>建档日期</dt>
                               <dd>{customer.created_at.slice(0, 10)}</dd>
                             </div>
@@ -1588,6 +2203,15 @@ export default function App() {
                                   <ArrowDownToLine size={15} />
                                   打印 / PDF
                                 </button>
+                                {role !== '前台' && ex.id && (
+                                  <button
+                                    className="button small danger-button"
+                                    disabled={busy}
+                                    onClick={() => changeRecord('exams', ex.id!)}
+                                  >
+                                    删除本次检查
+                                  </button>
+                                )}
                               </div>
                               <div className="exam-layout">
                                 <div>
@@ -1644,6 +2268,25 @@ export default function App() {
                       ) : (
                         <Empty text="尚未录入检查数据" />
                       )}
+                      {role !== '前台' && removed.exams.length > 0 && (
+                        <div className="removed-records">
+                          <h3>已删除的检查</h3>
+                          {removed.exams.map((record) => (
+                            <div key={record.id}>
+                              <span>
+                                {record.date} · {record.conclusion || '听力检查'}
+                              </span>
+                              <button
+                                className="button small"
+                                disabled={busy}
+                                onClick={() => changeRecord('exams', record.id, true)}
+                              >
+                                恢复
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   )}
                   {tab === '验配记录' && (
@@ -1667,7 +2310,18 @@ export default function App() {
                                 </span>
                                 <h3>{[f.brand, f.series, f.model].filter(Boolean).join(' · ')}</h3>
                               </div>
-                              <Headphones size={25} />
+                              <div className="record-actions">
+                                <Headphones size={25} />
+                                {role !== '前台' && (
+                                  <button
+                                    className="button small danger-button"
+                                    disabled={busy}
+                                    onClick={() => changeRecord('fittings', f.id)}
+                                  >
+                                    删除
+                                  </button>
+                                )}
+                              </div>
                             </div>
                             <dl className="info-grid">
                               <div>
@@ -1688,6 +2342,28 @@ export default function App() {
                         ))
                       ) : (
                         <Empty text="暂无验配记录" />
+                      )}
+                      {role !== '前台' && removed.fittings.length > 0 && (
+                        <div className="removed-records">
+                          <h3>已删除的验配记录</h3>
+                          {removed.fittings.map((record) => (
+                            <div key={record.id}>
+                              <span>
+                                {record.date} ·{' '}
+                                {[record.brand, record.series, record.model]
+                                  .filter(Boolean)
+                                  .join(' · ')}
+                              </span>
+                              <button
+                                className="button small"
+                                disabled={busy}
+                                onClick={() => changeRecord('fittings', record.id, true)}
+                              >
+                                恢复
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </section>
                   )}
@@ -1865,13 +2541,55 @@ export default function App() {
                   icon={<CheckCircle2 />}
                 />
                 <Stat
-                  label="试戴中"
-                  value={customers.filter((c) => c.status === '试戴中').length}
-                  unit="位"
-                  detail="等待效果反馈与选配决定"
-                  icon={<Ear />}
+                  label="保修需关注"
+                  value={warrantyAlerts.length}
+                  unit="项"
+                  detail="已过期或 90 天内到期"
+                  icon={<Bell />}
+                  warning
                 />
               </div>
+              <section className="panel padded warranty-panel">
+                <div className="section-title">
+                  <div>
+                    <h2>保修到期提醒</h2>
+                    <p className="muted">
+                      列出已过期和未来 90 天内到期的设备，点击客户可查看验配档案。
+                    </p>
+                  </div>
+                  <Bell size={20} />
+                </div>
+                {warrantyAlerts.length ? (
+                  <div className="warranty-list">
+                    {warrantyAlerts.map((item) => {
+                      const remaining = daysUntil(item.warranty);
+                      return (
+                        <button key={item.id} onClick={() => openCustomer(item.customer_id)}>
+                          <span>
+                            <strong>{item.name}</strong>
+                            <small>
+                              {[item.brand, item.series, item.model].filter(Boolean).join(' · ')}
+                            </small>
+                          </span>
+                          <span className="warranty-date">
+                            {item.warranty}
+                            <small className={remaining < 0 ? 'danger' : ''}>
+                              {remaining < 0
+                                ? `已过期 ${-remaining} 天`
+                                : remaining === 0
+                                  ? '今天到期'
+                                  : `${remaining} 天后到期`}
+                            </small>
+                          </span>
+                          <ChevronRight size={17} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <Empty text="暂无已过期或 90 天内到期的保修记录" />
+                )}
+              </section>
               <div className="report-grid">
                 <Distribution
                   title="客户来源"
@@ -2180,6 +2898,20 @@ export default function App() {
                       maxLength={100}
                       value={draft.contact}
                       onChange={(e) => change('contact', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="其他联系人电话">
+                    <input
+                      maxLength={30}
+                      value={draft.contactPhone || ''}
+                      onChange={(e) => change('contactPhone', e.target.value)}
+                    />
+                  </Field>
+                  <Field label="住址" wide>
+                    <input
+                      maxLength={300}
+                      value={draft.address || ''}
+                      onChange={(e) => change('address', e.target.value)}
                     />
                   </Field>
                   <Field label="客户来源">

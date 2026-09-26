@@ -28,6 +28,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0001_schema.sql', 'utf8'));
   db.exec(readFileSync('migrations/0002_demo_seed.sql', 'utf8'));
   db.exec(readFileSync('migrations/0003_device_catalog.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0004_intake_and_corrections.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -57,6 +58,141 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('单页建档一次保存住址、独立联系人、听力图、验配和随访', async () => {
+    const curve = () =>
+      frequencies.map((frequency) => ({ frequency, value: 45, masked: false, noResponse: false }));
+    const payload = {
+      customer: {
+        name: '一站式演示客户',
+        gender: '女',
+        birthDate: '1965-05-06',
+        phone: '虚构号码',
+        address: '虚构测试地址',
+        contact: '家属（演示）',
+        contactPhone: '虚构家属号码',
+        source: '自然到店',
+        status: '试戴中',
+        history: '测试主诉',
+        needs: '测试需求',
+      },
+      exam: {
+        date: '2026-09-26',
+        right: curve(),
+        left: curve(),
+        boneRight: curve(),
+        boneLeft: curve(),
+        speech: '测试言语',
+        other: '测试其他',
+        conclusion: '测试结论',
+      },
+      fitting: {
+        date: '2026-09-26',
+        deviceModelId: 'demo-model-audeo',
+        brand: '峰力',
+        series: 'Lumity',
+        model: 'Audeo L50-R',
+        side: '双耳',
+        serial: 'DEMO-NEW',
+        amount: 5000,
+        warranty: '2026-10-20',
+        notes: '测试验配',
+      },
+      followup: { due: '2026-10-01', type: '适应回访', note: '测试回访' },
+    };
+    const response = await req('/intakes', 'POST', payload);
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as any;
+    const customer = ((await (await req('/customers')).json()) as any[]).find(
+      (row) => row.id === id,
+    );
+    expect(customer).toMatchObject({
+      address: '虚构测试地址',
+      contact: '家属（演示）',
+      contactPhone: '虚构家属号码',
+    });
+    const detail = (await (await req(`/customers/${id}/detail`)).json()) as any;
+    expect(detail.exams).toHaveLength(1);
+    expect(detail.fittings[0]).toMatchObject({ model: 'Audeo L50-R', warranty: '2026-10-20' });
+    expect(detail.followups).toHaveLength(1);
+    expect(
+      ((await (await req('/warranties')).json()) as any[]).some((row) => row.customer_id === id),
+    ).toBe(true);
+    expect(
+      ((await (await req('/search?q=' + encodeURIComponent('虚构家属号码'))).json()) as any[]).some(
+        (row) => row.id === id,
+      ),
+    ).toBe(true);
+  });
+  it('前台不能通过一站式建档绕过专业录入权限，错误不会留下半份档案', async () => {
+    const login = await req('/login', 'POST', { role: '前台' });
+    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
+    const before = db.prepare('SELECT COUNT(*) count FROM customers').get() as any;
+    const base = {
+      name: '权限测试',
+      gender: '未填写',
+      birthDate: '1960-01-01',
+      phone: '',
+      contact: '',
+      address: '',
+      contactPhone: '',
+      source: '自然到店',
+      status: '待评估',
+      history: '',
+      needs: '',
+    };
+    expect(
+      (await req('/intakes', 'POST', { customer: base, exam: { date: '2026-09-26' } })).status,
+    ).toBe(400);
+    const curve = () =>
+      frequencies.map((frequency) => ({
+        frequency,
+        value: null,
+        masked: false,
+        noResponse: false,
+      }));
+    expect(
+      (
+        await req('/intakes', 'POST', {
+          customer: base,
+          exam: {
+            date: '2026-09-26',
+            right: curve(),
+            left: curve(),
+            boneRight: curve(),
+            boneLeft: curve(),
+            speech: '',
+            other: '',
+            conclusion: '测试',
+          },
+        })
+      ).status,
+    ).toBe(403);
+    expect((db.prepare('SELECT COUNT(*) count FROM customers').get() as any).count).toBe(
+      before.count,
+    );
+    expect((await req('/intakes', 'POST', { customer: base })).status).toBe(201);
+  });
+  it('误录的检查和验配可删除并恢复，统计与搜索忽略已删除记录', async () => {
+    const before = (await (await req('/customers/demo-1/detail')).json()) as any;
+    const examId = before.exams[0].id,
+      fittingId = before.fittings[0].id;
+    expect((await req(`/customers/demo-1/exams/${examId}`, 'DELETE')).status).toBe(200);
+    expect((await req(`/customers/demo-1/fittings/${fittingId}`, 'DELETE')).status).toBe(200);
+    const after = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(after.exams).toHaveLength(0);
+    expect(after.fittings).toHaveLength(0);
+    const removed = (await (await req('/customers/demo-1/removed')).json()) as any;
+    expect(removed.exams[0].id).toBe(examId);
+    expect(removed.fittings[0].id).toBe(fittingId);
+    expect(
+      ((await (await req('/warranties')).json()) as any[]).some((row) => row.id === fittingId),
+    ).toBe(false);
+    expect((await req(`/customers/demo-1/exams/${examId}/restore`, 'POST')).status).toBe(200);
+    expect((await req(`/customers/demo-1/fittings/${fittingId}/restore`, 'POST')).status).toBe(200);
+    const restored = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(restored.exams).toHaveLength(1);
+    expect(restored.fittings).toHaveLength(1);
+  });
   it('型号字典按品牌、系列、型号管理，验配引用字典并保留历史名称', async () => {
     const initial = (await (await req('/device-catalog')).json()) as any;
     expect(initial.brands).toHaveLength(3);

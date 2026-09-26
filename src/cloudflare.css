@@ -811,3 +811,144 @@
     min-height: 0;
   }
 }
+.cf-shell .intake-page {
+  max-width: 1280px;
+  margin: 0 auto;
+}
+.cf-shell .intake-section {
+  margin-bottom: 20px;
+}
+.cf-shell .intake-section .section-title {
+  margin-bottom: 20px;
+}
+.cf-shell .intake-section .section-title h2 {
+  margin-top: 5px;
+}
+.cf-shell .intake-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  color: #555;
+  font-size: 13px;
+  cursor: pointer;
+}
+.cf-shell .intake-toggle input {
+  accent-color: #f48120;
+}
+.cf-shell .intake-section .form-grid {
+  margin-top: 14px;
+}
+.cf-shell .intake-chart {
+  max-width: 560px;
+  margin: 24px auto;
+  padding: 12px;
+  border: 1px solid #e8e8e8;
+  border-radius: 8px;
+  background: #fff;
+}
+.cf-shell .intake-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 14px 18px;
+  border: 1px solid #e9e9e9;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 -6px 22px #0000000a;
+}
+.cf-shell .intake-actions span {
+  margin-right: auto;
+  color: #888;
+  font-size: 12px;
+}
+.cf-shell .warranty-panel {
+  margin-bottom: 24px;
+}
+.cf-shell .warranty-list {
+  display: grid;
+}
+.cf-shell .warranty-list button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 14px 2px;
+  border: 0;
+  border-top: 1px solid #ededed;
+  background: transparent;
+  text-align: left;
+}
+.cf-shell .warranty-list button:hover {
+  background: #fff8f1;
+}
+.cf-shell .warranty-list button > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.cf-shell .warranty-list strong,
+.cf-shell .warranty-list small {
+  display: block;
+}
+.cf-shell .warranty-list strong {
+  font-size: 14px;
+}
+.cf-shell .warranty-list small {
+  margin-top: 4px;
+  color: #888;
+  font-size: 12px;
+}
+.cf-shell .warranty-date {
+  text-align: right;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.cf-shell .warranty-date small {
+  color: #ca6f14;
+}
+.cf-shell .warranty-date small.danger {
+  color: #b44e43;
+}
+.cf-shell .record-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cf-shell .danger-button {
+  color: #b44e43;
+  border-color: #efdad7;
+}
+.cf-shell .removed-records {
+  margin-top: 24px;
+  padding-top: 18px;
+  border-top: 1px solid #ececec;
+}
+.cf-shell .removed-records h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.cf-shell .removed-records > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 0;
+  border-top: 1px solid #f2f2f2;
+  color: #777;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  .cf-shell .intake-actions {
+    flex-wrap: wrap;
+  }
+  .cf-shell .intake-actions span {
+    width: 100%;
+  }
+  .cf-shell .warranty-list button {
+    align-items: flex-start;
+  }
+}

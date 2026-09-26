@@ -8,6 +8,8 @@ export const customerSchema = z.object({
   ),
   phone: z.string().trim().max(30),
   contact: z.string().max(100).default(''),
+  contactPhone: z.string().trim().max(30).default(''),
+  address: z.string().trim().max(300).default(''),
   source: z.string().max(40),
   status: z.enum(['待评估', '试戴中', '已验配', '长期随访']),
   history: z.string().max(4000).default(''),
