@@ -941,6 +941,71 @@
   color: #777;
   font-size: 12px;
 }
+.cf-shell .removed-customer-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid #eeeeee;
+}
+.cf-shell .removed-customer-list strong,
+.cf-shell .removed-customer-list small {
+  display: block;
+}
+.cf-shell .removed-customer-list small {
+  margin-top: 4px;
+  color: #888;
+}
+.cf-shell .inline-profile-field dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.cf-shell .inline-edit-icon,
+.cf-shell .icon-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #919191;
+  cursor: pointer;
+}
+.cf-shell .inline-edit-icon:hover,
+.cf-shell .icon-action:hover {
+  background: #fff3e8;
+  color: #e87617;
+}
+.cf-shell .inline-edit-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.cf-shell .inline-edit-form input,
+.cf-shell .inline-edit-form select,
+.cf-shell .inline-edit-form textarea {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+.cf-shell .inline-edit-form textarea {
+  min-height: 78px;
+  width: 100%;
+}
+.cf-shell .task-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.cf-shell .task-actions .icon-action.danger-button:hover {
+  background: #fff0ef;
+  color: #b44e43;
+}
 @media (max-width: 700px) {
   .cf-shell .intake-actions {
     flex-wrap: wrap;

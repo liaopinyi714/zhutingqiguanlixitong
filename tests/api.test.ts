@@ -29,6 +29,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0002_demo_seed.sql', 'utf8'));
   db.exec(readFileSync('migrations/0003_device_catalog.sql', 'utf8'));
   db.exec(readFileSync('migrations/0004_intake_and_corrections.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0005_record_lifecycle.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -58,6 +59,110 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('客户可删除与恢复，关联资料退出普通查询且文件暂不可下载', async () => {
+    const form = new FormData();
+    form.append('file', new File(['%PDF-1.4\nfictional'], 'demo.pdf', { type: 'application/pdf' }));
+    const upload = await app.request(
+      'http://localhost/api/customers/demo-1/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env,
+    );
+    const fileId = ((await upload.json()) as any).id;
+    expect((await req('/customers/demo-1', 'DELETE')).status).toBe(200);
+    expect(
+      ((await (await req('/customers')).json()) as any[]).some((row) => row.id === 'demo-1'),
+    ).toBe(false);
+    expect(
+      ((await (await req('/search?q=陈淑华')).json()) as any[]).some((row) => row.id === 'demo-1'),
+    ).toBe(false);
+    expect(
+      ((await (await req('/followups')).json()) as any[]).some(
+        (row) => row.customer_id === 'demo-1',
+      ),
+    ).toBe(false);
+    expect(
+      ((await (await req('/warranties')).json()) as any[]).some(
+        (row) => row.customer_id === 'demo-1',
+      ),
+    ).toBe(false);
+    expect((await req('/customers/demo-1/detail')).status).toBe(404);
+    expect((await req('/files/' + fileId)).status).toBe(404);
+    expect(
+      ((await (await req('/customers/removed')).json()) as any[]).some(
+        (row) => row.id === 'demo-1',
+      ),
+    ).toBe(true);
+    expect((await req('/customers/demo-1/restore', 'POST')).status).toBe(200);
+    expect((await req('/customers/demo-1/detail')).status).toBe(200);
+    expect((await req('/files/' + fileId)).status).toBe(200);
+  });
+  it('检查、验配和随访可编辑且修改反映在档案和保修提醒中', async () => {
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    const exam = detail.exams[0],
+      fitting = detail.fittings[0],
+      followup = detail.followups[0];
+    expect(
+      (
+        await req(`/customers/demo-1/exams/${exam.id}`, 'PUT', {
+          ...exam,
+          conclusion: '更正后的结论',
+          right: exam.right.map((p: any, i: number) => (i === 0 ? { ...p, value: 55 } : p)),
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await req(`/customers/demo-1/fittings/${fitting.id}`, 'PUT', {
+          ...fitting,
+          warranty: '2026-11-30',
+          notes: '更正后的验配说明',
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await req(`/customers/demo-1/followups/${followup.id}`, 'PUT', {
+          ...followup,
+          due: '2026-10-02',
+          note: '更正后的随访计划',
+        })
+      ).status,
+    ).toBe(200);
+    const after = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(after.exams[0].conclusion).toBe('更正后的结论');
+    expect(after.exams[0].right[0].value).toBe(55);
+    expect(after.fittings[0]).toMatchObject({ warranty: '2026-11-30', notes: '更正后的验配说明' });
+    expect(after.followups[0]).toMatchObject({ due: '2026-10-02', note: '更正后的随访计划' });
+    const warranty = ((await (await req('/warranties')).json()) as any[]).find(
+      (row) => row.id === fitting.id,
+    );
+    expect(warranty.warranty).toBe('2026-11-30');
+    expect(after.audit.some((row: any) => row.action === '修改听力检查记录')).toBe(true);
+  });
+  it('随访可删除与恢复，前台不能删除客户或编辑专业检查', async () => {
+    const followupId = 'demo-1-follow';
+    expect((await req(`/customers/demo-1/followups/${followupId}`, 'DELETE')).status).toBe(200);
+    expect(
+      ((await (await req('/followups')).json()) as any[]).some((row) => row.id === followupId),
+    ).toBe(false);
+    expect(
+      ((await (await req('/customers/demo-1/removed')).json()) as any).followups.some(
+        (row: any) => row.id === followupId,
+      ),
+    ).toBe(true);
+    expect((await req(`/customers/demo-1/followups/${followupId}/restore`, 'POST')).status).toBe(
+      200,
+    );
+    expect(
+      ((await (await req('/followups')).json()) as any[]).some((row) => row.id === followupId),
+    ).toBe(true);
+    const login = await req('/login', 'POST', { role: '前台' });
+    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req('/customers/demo-1', 'DELETE')).status).toBe(403);
+    expect((await req('/customers/removed')).status).toBe(403);
+    const exam = ((await (await req('/customers/demo-1/detail')).json()) as any).exams[0];
+    expect((await req(`/customers/demo-1/exams/${exam.id}`, 'PUT', exam)).status).toBe(403);
+  });
   it('单页建档一次保存住址、独立联系人、听力图、验配和随访', async () => {
     const curve = () =>
       frequencies.map((frequency) => ({ frequency, value: 45, masked: false, noResponse: false }));

@@ -17,11 +17,14 @@ import {
   LogOut,
   MoreHorizontal,
   Plus,
+  Pencil,
+  RotateCcw,
   Search,
   Settings2,
   ShieldCheck,
   Upload,
   Users,
+  Trash2,
   X,
 } from 'lucide-react';
 import { frequencies, pta } from '../server/domain';
@@ -40,6 +43,7 @@ type Customer = {
   history: string;
   needs: string;
   created_at: string;
+  deleted_at?: string;
 };
 type Point = { frequency: number; value: number | null; noResponse: boolean; masked: boolean };
 type Exam = {
@@ -1105,15 +1109,20 @@ export default function App() {
     [boot, setBoot] = useState(true),
     [page, setPage] = useState('overview'),
     [customers, setCustomers] = useState<Customer[]>([]),
+    [removedCustomers, setRemovedCustomers] = useState<Customer[]>([]),
+    [showRemovedCustomers, setShowRemovedCustomers] = useState(false),
     [warranties, setWarranties] = useState<any[]>([]),
     [catalog, setCatalog] = useState<DeviceCatalog>({ brands: [], series: [], models: [] }),
     [followups, setFollowups] = useState<Follow[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
-    [removed, setRemoved] = useState<{ exams: any[]; fittings: any[] }>({
+    [removed, setRemoved] = useState<{ exams: any[]; fittings: any[]; followups: Follow[] }>({
       exams: [],
       fittings: [],
+      followups: [],
     }),
+    [editingField, setEditingField] = useState(''),
+    [editingValue, setEditingValue] = useState(''),
     [tab, setTab] = useState('概览'),
     [search, setSearch] = useState(''),
     [searchOpen, setSearchOpen] = useState(false),
@@ -1144,17 +1153,19 @@ export default function App() {
     setToast(msg);
     setTimeout(() => setToast(''), 3500);
   };
-  async function refresh() {
-    const [a, b, devices, warrantyRows] = await Promise.all([
+  async function refresh(includeRemoved = role === '店主') {
+    const [a, b, devices, warrantyRows, removedRows] = await Promise.all([
       api('/customers'),
       api('/followups'),
       api('/device-catalog'),
       api('/warranties'),
+      includeRemoved ? api('/customers/removed') : Promise.resolve([]),
     ]);
     setCustomers(a);
     setFollowups(b);
     setCatalog(devices);
     setWarranties(warrantyRows);
+    setRemovedCustomers(removedRows);
   }
   async function refreshCatalog() {
     setCatalog(await api('/device-catalog'));
@@ -1176,7 +1187,7 @@ export default function App() {
     api('/me')
       .then(async (r) => {
         setRole(r.role);
-        await refresh();
+        await refresh(r.role === '店主');
       })
       .catch(() => {})
       .finally(() => setBoot(false));
@@ -1265,6 +1276,7 @@ export default function App() {
     setTab('概览');
     setPage('customers');
     setError('');
+    setEditingField('');
   }
   function closeModal() {
     if (!busy) {
@@ -1299,39 +1311,63 @@ export default function App() {
     if (kind === 'exam') {
       const curve = () =>
         frequencies.map((f) => ({ frequency: f, value: null, noResponse: false, masked: false }));
-      setDraft({
-        date: today(),
-        right: curve(),
-        left: curve(),
-        boneRight: curve(),
-        boneLeft: curve(),
-        speech: '',
-        other: '',
-        conclusion: '',
-      });
+      setDraft(
+        record
+          ? { ...record }
+          : {
+              date: today(),
+              right: curve(),
+              left: curve(),
+              boneRight: curve(),
+              boneLeft: curve(),
+              speech: '',
+              other: '',
+              conclusion: '',
+            },
+      );
     }
-    if (kind === 'fitting')
-      setDraft({
-        date: today(),
-        deviceBrandId: '',
-        deviceSeriesId: '',
-        deviceModelId: '',
-        brand: '',
-        series: '',
-        model: '',
-        side: '双耳',
-        serial: '',
-        amount: 0,
-        warranty: '',
-        notes: '',
-      });
+    if (kind === 'fitting') {
+      const brand = catalog.brands.find((item) => item.name === record?.brand);
+      const series = catalog.series.find(
+        (item) => item.brand_id === brand?.id && item.name === record?.series,
+      );
+      setDraft(
+        record
+          ? {
+              ...record,
+              deviceSelectionChanged: false,
+              deviceBrandId: brand?.id || '',
+              deviceSeriesId: series?.id || '',
+              deviceModelId: record.deviceModelId || '',
+            }
+          : {
+              date: today(),
+              deviceSelectionChanged: true,
+              deviceBrandId: '',
+              deviceSeriesId: '',
+              deviceModelId: '',
+              brand: '',
+              series: '',
+              model: '',
+              side: '双耳',
+              serial: '',
+              amount: 0,
+              warranty: '',
+              notes: '',
+            },
+      );
+    }
     if (kind === 'followup')
-      setDraft({
-        due: today(),
-        type: '适应回访',
-        note: '',
-        customerId: selected || customers[0]?.id || '',
-      });
+      setDraft(
+        record
+          ? { ...record, customerId: record.customer_id }
+          : {
+              due: today(),
+              type: '适应回访',
+              note: '',
+              customerId: selected || customers[0]?.id || '',
+            },
+      );
     if (kind === 'complete') setDraft({ ...record, result: '' });
     setModal(kind);
   }
@@ -1349,8 +1385,13 @@ export default function App() {
     openCustomer(created.id);
     flash('客户档案及所选服务记录已保存');
   }
-  async function changeRecord(kind: 'exams' | 'fittings', recordId: string, restore = false) {
-    if (!selected) return;
+  async function changeRecord(
+    kind: 'exams' | 'fittings' | 'followups',
+    recordId: string,
+    restore = false,
+    customerId = selected,
+  ) {
+    if (!customerId) return;
     if (
       !restore &&
       !window.confirm('确认删除这条记录？删除后不会出现在档案和统计中，可在本页恢复。')
@@ -1360,12 +1401,51 @@ export default function App() {
     setError('');
     try {
       await api(
-        `/customers/${selected}/${kind}/${recordId}${restore ? '/restore' : ''}`,
+        `/customers/${customerId}/${kind}/${recordId}${restore ? '/restore' : ''}`,
         restore ? 'POST' : 'DELETE',
       );
-      await Promise.all([loadDetail(selected), refresh()]);
+      await Promise.all([
+        selected === customerId ? loadDetail(customerId) : Promise.resolve(),
+        refresh(),
+      ]);
       setExamIndex(0);
       flash(restore ? '记录已恢复' : '记录已删除，可在本页恢复');
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function changeCustomer(recordId: string, restore = false) {
+    if (
+      !restore &&
+      !window.confirm(
+        '确认删除这位客户的档案？检查、验配、随访和附件会一起从普通列表中隐藏，可从已删除档案恢复。',
+      )
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/customers/${recordId}${restore ? '/restore' : ''}`, restore ? 'POST' : 'DELETE');
+      if (!restore && selected === recordId) setSelected(null);
+      await refresh();
+      flash(restore ? '客户档案已恢复' : '客户档案已删除，可从列表恢复');
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function saveInlineField(field: keyof Customer) {
+    if (!customer) return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(`/customers/${customer.id}/profile`, 'PUT', { ...customer, [field]: editingValue });
+      await refresh();
+      setEditingField('');
+      flash('资料已更新');
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -1378,6 +1458,7 @@ export default function App() {
     setError('');
     try {
       let key = selected;
+      let latestDetail: Detail | null = null;
       if (modal === 'customer') {
         const r = await api(
           draft.id ? `/customers/${draft.id}/profile` : '/customers',
@@ -1386,24 +1467,45 @@ export default function App() {
         );
         key = draft.id || r.id;
       }
-      if (modal === 'exam') await api(`/customers/${selected}/exams`, 'POST', draft);
+      if (modal === 'exam')
+        await api(
+          `/customers/${selected}/exams${draft.id ? '/' + draft.id : ''}`,
+          draft.id ? 'PUT' : 'POST',
+          draft,
+        );
       if (modal === 'fitting')
-        await api(`/customers/${selected}/fittings`, 'POST', {
-          ...draft,
-          amount: Number(draft.amount),
-        });
+        await api(
+          `/customers/${selected}/fittings${draft.id ? '/' + draft.id : ''}`,
+          draft.id ? 'PUT' : 'POST',
+          {
+            ...draft,
+            amount: Number(draft.amount),
+          },
+        );
       if (modal === 'followup')
-        await api(`/customers/${draft.customerId}/followups`, 'POST', draft);
+        await api(
+          `/customers/${draft.customerId}/followups${draft.id ? '/' + draft.id : ''}`,
+          draft.id ? 'PUT' : 'POST',
+          draft,
+        );
       if (modal === 'complete')
         await api(`/followups/${draft.id}`, 'PUT', { result: draft.result });
       await refresh();
       if (key) {
         setSelected(key);
-        setDetail(await api(`/customers/${key}/detail`));
+        latestDetail = await api(`/customers/${key}/detail`);
+        setDetail(latestDetail);
       }
       if (modal === 'exam') {
         setTab('听力检查');
-        setExamIndex(0);
+        setExamIndex(
+          draft.id && latestDetail
+            ? Math.max(
+                0,
+                latestDetail.exams.findIndex((item) => item.id === draft.id),
+              )
+            : 0,
+        );
       }
       if (modal === 'fitting') setTab('验配记录');
       if (modal === 'customer') {
@@ -1627,19 +1729,111 @@ export default function App() {
                 {f.completed ? ' · 已完成' : ''}
               </small>
             </div>
-            {f.completed ? (
-              <CheckCircle2 size={20} className="green" />
-            ) : (
-              <button className="button small" onClick={() => openForm('complete', f)}>
-                记录结果
+            <div className="task-actions">
+              {f.completed ? (
+                <CheckCircle2 size={20} className="green" />
+              ) : (
+                <button className="button small" onClick={() => openForm('complete', f)}>
+                  记录结果
+                </button>
+              )}
+              <button
+                className="icon-action"
+                title="编辑随访"
+                aria-label={`编辑 ${f.name} 的随访`}
+                onClick={() => openForm('followup', f)}
+              >
+                <Pencil size={15} />
               </button>
-            )}
+              <button
+                className="icon-action danger-button"
+                title="删除随访"
+                aria-label={`删除 ${f.name} 的随访`}
+                disabled={busy}
+                onClick={() => changeRecord('followups', f.id, false, f.customer_id)}
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
           </div>
         ))}
       </div>
     ) : (
       <Empty text="这个列表暂时没有随访任务" />
     );
+  const profileField = (
+    field: keyof Customer,
+    label: string,
+    options?: string[],
+    multiline = false,
+  ) => {
+    if (!customer) return null;
+    const value = String(customer[field] || '');
+    return (
+      <div className="inline-profile-field" key={field}>
+        <dt>
+          {label}
+          <button
+            type="button"
+            className="inline-edit-icon"
+            title={`编辑${label}`}
+            aria-label={`编辑${label}`}
+            onClick={() => {
+              setEditingField(field);
+              setEditingValue(value);
+            }}
+          >
+            <Pencil size={13} />
+          </button>
+        </dt>
+        <dd>
+          {editingField === field ? (
+            <form
+              className="inline-edit-form"
+              onSubmit={(event) => {
+                event.preventDefault();
+                saveInlineField(field);
+              }}
+            >
+              {options ? (
+                <select
+                  autoFocus
+                  value={editingValue}
+                  onChange={(event) => setEditingValue(event.target.value)}
+                >
+                  {options.map((option) => (
+                    <option key={option}>{option}</option>
+                  ))}
+                </select>
+              ) : multiline ? (
+                <textarea
+                  autoFocus
+                  value={editingValue}
+                  onChange={(event) => setEditingValue(event.target.value)}
+                />
+              ) : (
+                <input
+                  autoFocus
+                  type={field === 'birthDate' ? 'date' : 'text'}
+                  required={field === 'name' || field === 'birthDate'}
+                  value={editingValue}
+                  onChange={(event) => setEditingValue(event.target.value)}
+                />
+              )}
+              <button type="submit" className="button small primary" disabled={busy}>
+                保存
+              </button>
+              <button type="button" className="button small" onClick={() => setEditingField('')}>
+                取消
+              </button>
+            </form>
+          ) : (
+            value || '未填写'
+          )}
+        </dd>
+      </div>
+    );
+  };
   return (
     <div className="app-shell cf-shell">
       <aside className="sidebar">
@@ -1977,6 +2171,43 @@ export default function App() {
                   共 {filtered.length} 位客户 <span>点击客户查看完整服务档案</span>
                 </div>
               </section>
+              {role === '店主' && (
+                <section className="panel padded space-top">
+                  <div className="section-title">
+                    <h2>已删除档案</h2>
+                    <button
+                      className="button small"
+                      onClick={() => setShowRemovedCustomers(!showRemovedCustomers)}
+                    >
+                      {showRemovedCustomers ? '收起' : `查看 ${removedCustomers.length} 位`}
+                    </button>
+                  </div>
+                  {showRemovedCustomers &&
+                    (removedCustomers.length ? (
+                      <div className="removed-customer-list">
+                        {removedCustomers.map((item) => (
+                          <div key={item.id}>
+                            <span>
+                              <strong>{item.name}</strong>
+                              <small>
+                                {item.phone || '未填写电话'} · 删除于 {item.deleted_at || '—'}
+                              </small>
+                            </span>
+                            <button
+                              className="button small"
+                              disabled={busy}
+                              onClick={() => changeCustomer(item.id, true)}
+                            >
+                              <RotateCcw size={14} /> 恢复档案
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="muted">没有已删除的客户档案</p>
+                    ))}
+                </section>
+              )}
             </>
           )}
           {page === 'customers' && customer && (
@@ -2010,6 +2241,16 @@ export default function App() {
                   <button className="button" onClick={() => openForm('customer', customer)}>
                     编辑档案
                   </button>
+                  {role === '店主' && (
+                    <button
+                      className="button danger-button"
+                      disabled={busy}
+                      onClick={() => changeCustomer(customer.id)}
+                    >
+                      <Trash2 size={16} />
+                      删除档案
+                    </button>
+                  )}
                   <button className="button primary" onClick={() => openForm('followup')}>
                     <Plus size={17} />
                     安排随访
@@ -2037,38 +2278,31 @@ export default function App() {
                             <FileText size={18} />
                           </div>
                           <dl className="info-grid">
-                            <div>
-                              <dt>出生日期</dt>
-                              <dd>{customer.birthDate}</dd>
-                            </div>
-                            <div>
-                              <dt>客户来源</dt>
-                              <dd>{customer.source}</dd>
-                            </div>
-                            <div>
-                              <dt>其他联系人</dt>
-                              <dd>{customer.contact || '未填写'}</dd>
-                            </div>
-                            <div>
-                              <dt>其他联系人电话</dt>
-                              <dd>{customer.contactPhone || '未填写'}</dd>
-                            </div>
-                            <div>
-                              <dt>住址</dt>
-                              <dd>{customer.address || '未填写'}</dd>
-                            </div>
+                            {profileField('name', '客户姓名')}
+                            {profileField('gender', '性别', ['未填写', '男', '女'])}
+                            {profileField('birthDate', '出生日期')}
+                            {profileField('phone', '客户电话')}
+                            {profileField('source', '客户来源', [
+                              '自然到店',
+                              '老客转介绍',
+                              '社区活动',
+                              '线上咨询',
+                              '其他',
+                            ])}
+                            {profileField('status', '服务阶段', statuses.slice(1))}
+                            {profileField('contact', '其他联系人')}
+                            {profileField('contactPhone', '其他联系人电话')}
+                            {profileField('address', '住址')}
                             <div>
                               <dt>建档日期</dt>
                               <dd>{customer.created_at.slice(0, 10)}</dd>
                             </div>
                           </dl>
                           <div className="note-block">
-                            <h3>听力与健康情况</h3>
-                            <p>{customer.history || '暂无记录'}</p>
+                            {profileField('history', '听力与健康情况', undefined, true)}
                           </div>
                           <div className="note-block">
-                            <h3>聆听需求与期望</h3>
-                            <p>{customer.needs || '暂无记录'}</p>
+                            {profileField('needs', '聆听需求与期望', undefined, true)}
                           </div>
                         </section>
                         <section className="panel padded space-top">
@@ -2205,6 +2439,15 @@ export default function App() {
                                 </button>
                                 {role !== '前台' && ex.id && (
                                   <button
+                                    className="button small"
+                                    onClick={() => openForm('exam', ex)}
+                                  >
+                                    <Pencil size={14} />
+                                    编辑本次检查
+                                  </button>
+                                )}
+                                {role !== '前台' && ex.id && (
+                                  <button
                                     className="button small danger-button"
                                     disabled={busy}
                                     onClick={() => changeRecord('exams', ex.id!)}
@@ -2314,6 +2557,15 @@ export default function App() {
                                 <Headphones size={25} />
                                 {role !== '前台' && (
                                   <button
+                                    className="button small"
+                                    onClick={() => openForm('fitting', f)}
+                                  >
+                                    <Pencil size={14} />
+                                    编辑
+                                  </button>
+                                )}
+                                {role !== '前台' && (
+                                  <button
                                     className="button small danger-button"
                                     disabled={busy}
                                     onClick={() => changeRecord('fittings', f.id)}
@@ -2380,6 +2632,25 @@ export default function App() {
                         </button>
                       </div>
                       {taskRows(detail.followups.map((f) => ({ ...f, name: customer.name })))}
+                      {removed.followups.length > 0 && (
+                        <div className="removed-records padded">
+                          <h3>已删除的随访</h3>
+                          {removed.followups.map((record) => (
+                            <div key={record.id}>
+                              <span>
+                                {record.due} · {record.type} · {record.note}
+                              </span>
+                              <button
+                                className="button small"
+                                disabled={busy}
+                                onClick={() => changeRecord('followups', record.id, true)}
+                              >
+                                恢复
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </section>
                   )}
                   {tab === '报告附件' && (
@@ -2834,9 +3105,9 @@ export default function App() {
           title={
             {
               customer: draft.id ? '编辑客户档案' : '新建客户档案',
-              exam: '录入听力检查',
-              fitting: '新增验配记录',
-              followup: '安排随访与预约',
+              exam: draft.id ? '编辑听力检查' : '录入听力检查',
+              fitting: draft.id ? '编辑验配记录' : '新增验配记录',
+              followup: draft.id ? '编辑随访与预约' : '安排随访与预约',
               complete: '记录随访结果',
             }[modal] || ''
           }
@@ -3036,6 +3307,9 @@ export default function App() {
                       </tbody>
                     </table>
                   </div>
+                  <div className="intake-chart">
+                    <Audiogram exam={draft as Exam} />
+                  </div>
                   <div className="form-grid space-top">
                     <Field label="言语测听" wide>
                       <textarea
@@ -3087,11 +3361,12 @@ export default function App() {
                   </Field>
                   <Field label="品牌 *">
                     <select
-                      required
+                      required={!draft.id || draft.deviceSelectionChanged}
                       value={draft.deviceBrandId || ''}
                       onChange={(e) =>
                         setDraft((d: any) => ({
                           ...d,
+                          deviceSelectionChanged: true,
                           deviceBrandId: e.target.value,
                           deviceSeriesId: '',
                           deviceModelId: '',
@@ -3101,7 +3376,9 @@ export default function App() {
                         }))
                       }
                     >
-                      <option value="">选择品牌</option>
+                      <option value="">
+                        {draft.id ? `保留原品牌：${draft.brand}` : '选择品牌'}
+                      </option>
                       {catalog.brands.map((b) => (
                         <option key={b.id} value={b.id}>
                           {b.name}
@@ -3111,11 +3388,12 @@ export default function App() {
                   </Field>
                   <Field label="系列 *">
                     <select
-                      required
+                      required={!draft.id || draft.deviceSelectionChanged}
                       value={draft.deviceSeriesId || ''}
                       onChange={(e) =>
                         setDraft((d: any) => ({
                           ...d,
+                          deviceSelectionChanged: true,
                           deviceSeriesId: e.target.value,
                           deviceModelId: '',
                           series: '',
@@ -3123,7 +3401,9 @@ export default function App() {
                         }))
                       }
                     >
-                      <option value="">选择系列</option>
+                      <option value="">
+                        {draft.id ? `保留原系列：${draft.series || '无'}` : '选择系列'}
+                      </option>
                       {catalog.series
                         .filter((s) => s.brand_id === draft.deviceBrandId)
                         .map((s) => (
@@ -3135,7 +3415,7 @@ export default function App() {
                   </Field>
                   <Field label="型号 *">
                     <select
-                      required
+                      required={!draft.id || draft.deviceSelectionChanged}
                       value={draft.deviceModelId || ''}
                       onChange={(e) => {
                         const selectedModel = catalog.models.find((m) => m.id === e.target.value);
@@ -3147,6 +3427,7 @@ export default function App() {
                         );
                         setDraft((d: any) => ({
                           ...d,
+                          deviceSelectionChanged: true,
                           deviceModelId: e.target.value,
                           brand: selectedBrand?.name || '',
                           series: selectedSeries?.name || '',
@@ -3154,7 +3435,9 @@ export default function App() {
                         }));
                       }}
                     >
-                      <option value="">选择型号</option>
+                      <option value="">
+                        {draft.id ? `保留原型号：${draft.model}` : '选择型号'}
+                      </option>
                       {catalog.models
                         .filter((m) => m.series_id === draft.deviceSeriesId)
                         .map((m) => (
@@ -3203,6 +3486,7 @@ export default function App() {
                     <select
                       required
                       value={draft.customerId}
+                      disabled={!!draft.id}
                       onChange={(e) => change('customerId', e.target.value)}
                     >
                       {customers.map((c) => (
@@ -3235,6 +3519,15 @@ export default function App() {
                       placeholder="本次需要关注的问题、希望了解的佩戴反馈…"
                     />
                   </Field>
+                  {!!draft.completed && (
+                    <Field label="本次联系结果 *" wide>
+                      <textarea
+                        required
+                        value={draft.result || ''}
+                        onChange={(e) => change('result', e.target.value)}
+                      />
+                    </Field>
+                  )}
                 </div>
               )}
               {modal === 'complete' && (
