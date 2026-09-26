@@ -3,40 +3,69 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { customerSchema, examSchema, fittingSchema, followupSchema, canWrite } from './domain';
 import { purgeExpiredRecords, retentionCutoff } from './retention';
-type Env = { DB: D1Database; FILES: R2Bucket; DEMO_MODE: string };
-type Session = { role: string; tenant_id: string };
+import { bodyLimit } from 'hono/body-limit';
+import { accessSession, AuthError, isLocalDemo, type AuthEnv, type Session } from './auth';
+type Env = AuthEnv & { DB: D1Database; FILES: R2Bucket };
 export const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
 const id = () => crypto.randomUUID();
 app.onError((err, c) => {
   if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
-  console.error(err.message);
+  if (err instanceof AuthError) return c.json({ error: err.message }, err.status);
+  // Do not log query values, customer content, tokens or attachment names.
+  console.error('request_failed', { path: c.req.routePath, kind: err.name });
   return c.json({ error: '服务暂时不可用，请稍后重试。' }, 500);
 });
 app.use('/api/*', async (c, next) => {
   c.header('Cache-Control', 'no-store');
   c.header('X-Content-Type-Options', 'nosniff');
+  c.header('Referrer-Policy', 'no-referrer');
+  c.header('X-Frame-Options', 'DENY');
+  const demo = isLocalDemo(c.env, c.req.url);
   if (!['GET', 'HEAD'].includes(c.req.method)) {
     const origin = c.req.header('Origin');
     if (
       origin &&
       origin !== new URL(c.req.url).origin &&
-      !(new URL(c.req.url).hostname === '127.0.0.1' && origin === 'http://127.0.0.1:5173')
+      !(demo && origin === 'http://127.0.0.1:5173')
     )
       return c.json({ error: '请求来源不受信任' }, 403);
+    if (!demo && (!origin || c.req.header('X-Requested-With') !== 'hearing-care'))
+      return c.json({ error: '请求校验失败，请刷新后重试' }, 403);
   }
-  if (c.req.path === '/api/login') return next();
+  if (c.req.path === '/api/config') return next();
+  if (c.req.path === '/api/login') {
+    if (!demo) return c.json({ error: '正式环境不支持演示角色登录' }, 403);
+    return next();
+  }
+  if (!demo) {
+    c.set('session', await accessSession(c.req.raw, c.env));
+    return next();
+  }
   const token = getCookie(c, 'hearing_session');
   const s = token
     ? await c.env.DB.prepare('SELECT role,tenant_id FROM sessions WHERE token=? AND expires_at>?')
         .bind(token, Date.now())
-        .first<Session>()
+        .first<{ role: string; tenant_id: string }>()
     : null;
-  if (!s) return c.json({ error: '请先登录演示工作台' }, 401);
-  c.set('session', s);
+  if (!s || !['店主', '验配师', '前台'].includes(s.role))
+    return c.json({ error: '请先登录工作台' }, 401);
+  c.set('session', {
+    ...s,
+    actor: s.role,
+    name: `演示${s.role}`,
+    storeName: '聆序听力 · 演示门店',
+  });
   await next();
 });
+app.use('/api/*', async (c, next) =>
+  bodyLimit({
+    maxSize: c.req.path.endsWith('/attachments') ? 11 * 1024 * 1024 : 128 * 1024,
+    onError: (ctx) => ctx.json({ error: '提交内容过大，请缩小文件或减少文本' }, 413),
+  })(c, next),
+);
+app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
+app.get('/api/auth/start', (c) => c.redirect('/'));
 app.post('/api/login', async (c) => {
-  if (c.env.DEMO_MODE !== 'true') return c.json({ error: '演示登录已关闭；正式认证尚未配置' }, 403);
   const data = await c.req.json();
   if (!['店主', '验配师', '前台'].includes(data.role))
     return c.json({ error: '请选择演示角色' }, 400);
@@ -54,10 +83,10 @@ app.post('/api/login', async (c) => {
   });
   return c.json({ role: data.role });
 });
-app.get('/api/me', (c) =>
-  c.json({ role: c.get('session').role, demo: c.env.DEMO_MODE === 'true' }),
-);
+app.get('/api/me', (c) => c.json({ ...c.get('session'), demo: isLocalDemo(c.env, c.req.url) }));
 app.post('/api/logout', async (c) => {
+  if (!isLocalDemo(c.env, c.req.url))
+    return c.json({ ok: true, logoutUrl: '/cdn-cgi/access/logout' });
   await c.env.DB.prepare('DELETE FROM sessions WHERE token=?')
     .bind(getCookie(c, 'hearing_session') || '')
     .run();
@@ -150,7 +179,7 @@ app.post('/api/device-catalog/:kind', async (c) => {
     ).bind(
       id(),
       tenant,
-      session.role,
+      session.actor,
       `新增助听器${kind === 'brands' ? '品牌' : kind === 'series' ? '系列' : '型号'}：${name}`,
     ),
   ]);
@@ -193,7 +222,7 @@ app.put('/api/device-catalog/:kind/:id', async (c) => {
     ),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,NULL)',
-    ).bind(id(), tenant, session.role, `修改助听器字典：${current.name} → ${parsed.data}`),
+    ).bind(id(), tenant, session.actor, `修改助听器字典：${current.name} → ${parsed.data}`),
   ]);
   return c.json({ ok: true });
 });
@@ -241,7 +270,7 @@ app.delete('/api/device-catalog/:kind/:id', async (c) => {
   statements.push(
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,NULL)',
-    ).bind(id(), tenant, session.role, `停用助听器字典：${current.name}`),
+    ).bind(id(), tenant, session.actor, `停用助听器字典：${current.name}`),
   );
   await c.env.DB.batch(statements);
   return c.json({ ok: true });
@@ -309,7 +338,7 @@ app.post('/api/customers', async (c) => {
     ),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '创建客户档案', key),
+    ).bind(id(), s.tenant_id, s.actor, '创建客户档案', key),
   ]);
   return c.json({ id: key }, 201);
 });
@@ -351,7 +380,7 @@ app.post('/api/intakes', async (c) => {
     ),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '创建客户档案', customerId),
+    ).bind(id(), s.tenant_id, s.actor, '创建客户档案', customerId),
   ];
   if (d.exam) {
     statements.push(
@@ -362,7 +391,7 @@ app.post('/api/intakes', async (c) => {
     statements.push(
       c.env.DB.prepare(
         'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.role, '建档时录入听力检查', customerId),
+      ).bind(id(), s.tenant_id, s.actor, '建档时录入听力检查', customerId),
     );
   }
   if (fitting) {
@@ -374,7 +403,7 @@ app.post('/api/intakes', async (c) => {
     statements.push(
       c.env.DB.prepare(
         'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.role, '建档时录入验配', customerId),
+      ).bind(id(), s.tenant_id, s.actor, '建档时录入验配', customerId),
     );
   }
   if (d.followup) {
@@ -412,7 +441,7 @@ app.delete('/api/customers/:id', async (c) => {
     ).bind(key, s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '删除客户档案', key),
+    ).bind(id(), s.tenant_id, s.actor, '删除客户档案', key),
   ]);
   return c.json({ ok: true });
 });
@@ -432,7 +461,7 @@ app.post('/api/customers/:id/restore', async (c) => {
     ).bind(key, s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '恢复客户档案', key),
+    ).bind(id(), s.tenant_id, s.actor, '恢复客户档案', key),
   ]);
   return c.json({ ok: true });
 });
@@ -490,7 +519,7 @@ app.put('/api/customers/:id/profile', async (c) => {
     ),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '更新客户档案', k),
+    ).bind(id(), s.tenant_id, s.actor, '更新客户档案', k),
   ]);
   return c.json({ ok: true });
 });
@@ -524,7 +553,7 @@ for (const [path, schema, resource, label] of [
       statement,
       c.env.DB.prepare(
         'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.role, label, customer),
+      ).bind(id(), s.tenant_id, s.actor, label, customer),
     ]);
     return c.json({ id: k }, 201);
   });
@@ -569,7 +598,7 @@ for (const [kind, schema, resource, label] of [
       ).bind(data.date, JSON.stringify(data), record, customer, s.tenant_id),
       c.env.DB.prepare(
         'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.role, label, customer),
+      ).bind(id(), s.tenant_id, s.actor, label, customer),
     ]);
     return c.json({ ok: true });
   });
@@ -598,7 +627,7 @@ app.put('/api/customers/:id/followups/:recordId', async (c) => {
     ).bind(d.due, d.type, d.note, d.result || '', record, customer, s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '修改随访记录', customer),
+    ).bind(id(), s.tenant_id, s.actor, '修改随访记录', customer),
   ]);
   return c.json({ ok: true });
 });
@@ -648,7 +677,7 @@ for (const kind of ['exams', 'fittings', 'followups'] as const) {
       ).bind(
         id(),
         s.tenant_id,
-        s.role,
+        s.actor,
         kind === 'exams'
           ? '删除听力检查记录'
           : kind === 'fittings'
@@ -680,7 +709,7 @@ for (const kind of ['exams', 'fittings', 'followups'] as const) {
       ).bind(
         id(),
         s.tenant_id,
-        s.role,
+        s.actor,
         kind === 'exams'
           ? '恢复听力检查记录'
           : kind === 'fittings'
@@ -729,7 +758,7 @@ app.put('/api/followups/:id', async (c) => {
     ).bind(d.result, c.req.param('id'), s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '完成随访', r.customer_id),
+    ).bind(id(), s.tenant_id, s.actor, '完成随访', r.customer_id),
   ]);
   return c.json({ ok: true });
 });
@@ -764,7 +793,7 @@ app.post('/api/customers/:id/attachments', async (c) => {
       ).bind(k, s.tenant_id, c.req.param('id'), file.name.slice(0, 200), file.type, file.size, key),
       c.env.DB.prepare(
         'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.role, '上传检查报告', c.req.param('id')),
+      ).bind(id(), s.tenant_id, s.actor, '上传检查报告', c.req.param('id')),
     ]);
   } catch (e) {
     await c.env.FILES.delete(key);
@@ -789,7 +818,7 @@ app.delete('/api/customers/:id/attachments/:recordId', async (c) => {
     ).bind(record, customer, s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '删除报告附件', customer),
+    ).bind(id(), s.tenant_id, s.actor, '删除报告附件', customer),
   ]);
   return c.json({ ok: true });
 });
@@ -810,7 +839,7 @@ app.post('/api/customers/:id/attachments/:recordId/restore', async (c) => {
     ).bind(record, customer, s.tenant_id),
     c.env.DB.prepare(
       'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.role, '恢复报告附件', customer),
+    ).bind(id(), s.tenant_id, s.actor, '恢复报告附件', customer),
   ]);
   return c.json({ ok: true });
 });

@@ -117,9 +117,18 @@ const restoreDeadline = (deletedAt: string) =>
 async function api(path: string, method = 'GET', data?: unknown) {
   const response = await fetch('/api' + path, {
     method,
-    headers: data instanceof FormData ? {} : { 'Content-Type': 'application/json' },
+    headers: {
+      'X-Requested-With': 'hearing-care',
+      ...(data instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
+    },
+    redirect: 'manual',
     body: data === undefined ? undefined : data instanceof FormData ? data : JSON.stringify(data),
   });
+  if (
+    response.type === 'opaqueredirect' ||
+    !response.headers.get('Content-Type')?.includes('application/json')
+  )
+    throw new Error('登录可能已过期。请先保存未提交的内容，再刷新页面重新登录。');
   const result: any = await response.json();
   if (!response.ok) throw new Error(result.error || '请求失败');
   return result;
@@ -741,7 +750,7 @@ function IntakePage({
                 maxLength={30}
                 value={profile.phone}
                 onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                placeholder="演示时请使用虚构号码"
+                placeholder="填写客户联系电话"
               />
             </Field>
             <Field label="住址" wide>
@@ -1158,7 +1167,8 @@ export default function App() {
     [examIndex, setExamIndex] = useState(0),
     [compare, setCompare] = useState(false),
     [taskFilter, setTaskFilter] = useState('待完成'),
-    [loginRole, setLoginRole] = useState('店主');
+    [loginRole, setLoginRole] = useState('店主'),
+    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力' });
   const customer = customers.find((c) => c.id === selected),
     pending = followups.filter((f) => !f.completed),
     overdue = pending.filter((f) => f.due < today()),
@@ -1202,12 +1212,19 @@ export default function App() {
     }
   }
   useEffect(() => {
-    api('/me')
-      .then(async (r) => {
+    (async () => {
+      const config = await api('/config');
+      setIdentity((previous) => ({ ...previous, demo: config.demo }));
+      try {
+        const r = await api('/me');
+        setIdentity(r);
         setRole(r.role);
         await refresh(r.role === '店主');
-      })
-      .catch(() => {})
+      } catch (reason) {
+        if (!config.demo) setError((reason as Error).message);
+      }
+    })()
+      .catch((reason) => setError((reason as Error).message))
       .finally(() => setBoot(false));
   }, []);
   useEffect(() => {
@@ -1580,7 +1597,7 @@ export default function App() {
       );
       const a = document.createElement('a');
       a.href = url;
-      a.download = `聆序-演示档案-${today()}.json`;
+      a.download = `聆序-客户档案-${today()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       flash('档案已导出，附件请在档案中单独下载');
@@ -1619,43 +1636,54 @@ export default function App() {
           <div className="cf-login-intro">
             <span className="eyebrow">客户服务工作台</span>
             <h1>进入聆序工作台</h1>
-            <p>选择演示角色，查看客户档案、听力检查、验配与随访记录。</p>
+            <p>
+              {identity.demo
+                ? '选择演示角色，查看客户档案、听力检查、验配与随访记录。'
+                : '使用已获授权的员工邮箱登录，继续为客户提供服务。'}
+            </p>
           </div>
           <section className="cf-login-card">
             <div className="cf-login-card-head">
               <span className="cf-login-pill">
-                <i /> 演示空间
+                <i /> {identity.demo ? '演示空间' : '员工工作空间'}
               </span>
-              <span>选择体验角色</span>
+              <span>{identity.demo ? '选择体验角色' : '验证员工身份'}</span>
             </div>
-            <div className="cf-role-options">
-              {['店主', '验配师', '前台'].map((r) => (
-                <button
-                  key={r}
-                  className={loginRole === r ? 'selected' : ''}
-                  aria-pressed={loginRole === r}
-                  onClick={() => setLoginRole(r)}
-                >
-                  <span>{r}</span>
-                  <small>
-                    {r === '店主'
-                      ? '全部档案、统计与导出'
-                      : r === '验配师'
-                        ? '听力检查、验配与随访'
-                        : '客户建档、预约与回访'}
-                  </small>
-                  {loginRole === r && <CheckCircle2 size={18} />}
-                </button>
-              ))}
-            </div>
+            {identity.demo && (
+              <div className="cf-role-options">
+                {['店主', '验配师', '前台'].map((r) => (
+                  <button
+                    key={r}
+                    className={loginRole === r ? 'selected' : ''}
+                    aria-pressed={loginRole === r}
+                    onClick={() => setLoginRole(r)}
+                  >
+                    <span>{r}</span>
+                    <small>
+                      {r === '店主'
+                        ? '全部档案、统计与导出'
+                        : r === '验配师'
+                          ? '听力检查、验配与随访'
+                          : '客户建档、预约与回访'}
+                    </small>
+                    {loginRole === r && <CheckCircle2 size={18} />}
+                  </button>
+                ))}
+              </div>
+            )}
             <button
               className="button primary full cf-login-submit"
               disabled={busy}
               onClick={async () => {
+                if (!identity.demo) {
+                  window.location.assign('/api/auth/start');
+                  return;
+                }
                 setBusy(true);
                 setError('');
                 try {
                   await api('/login', 'POST', { role: loginRole });
+                  setIdentity(await api('/me'));
                   await refresh(loginRole === '店主');
                   setRole(loginRole);
                 } catch (e) {
@@ -1665,13 +1693,15 @@ export default function App() {
                 }
               }}
             >
-              {busy ? '正在进入…' : '进入演示工作台'}
+              {busy ? '正在进入…' : identity.demo ? '进入演示工作台' : '验证身份并进入'}
               <ArrowRight size={17} />
             </button>
             {error && <div className="error">{error}</div>}
             <p className="cf-login-note">
               <ShieldCheck size={16} />
-              本演示含虚构客户资料，请勿录入真实个人信息。演示角色可公开切换。
+              {identity.demo
+                ? '本演示含虚构客户资料，请勿录入真实个人信息。演示角色可公开切换。'
+                : '门店和操作权限由管理员分配。如无法进入，请联系管理员核对员工邮箱。'}
             </p>
           </section>
         </main>
@@ -1887,7 +1917,7 @@ export default function App() {
         <div className="store-switch">
           <div className="store-mark">聆</div>
           <div>
-            <strong>聆序听力 · 演示门店</strong>
+            <strong>{identity.storeName}</strong>
             <small>客户服务工作空间</small>
           </div>
         </div>
@@ -1908,25 +1938,32 @@ export default function App() {
         <div className="sidebar-bottom">
           <div className="demo-box">
             <span className="demo-dot" />
-            演示空间
+            {identity.demo ? '演示空间' : '门店工作空间'}
             <p>
-              数据已保存至演示数据库
+              {identity.demo ? '数据已保存至演示数据库' : '客户资料按门店独立管理'}
               <br />
-              请勿录入真实客户资料
+              {identity.demo ? '请勿录入真实客户资料' : '已删除资料保留 30 天'}
             </p>
           </div>
           <button
             className="profile"
             onClick={async () => {
-              await api('/logout', 'POST');
-              setRole('');
-              setSelected(null);
+              try {
+                const result = await api('/logout', 'POST');
+                if (result.logoutUrl) window.location.assign(result.logoutUrl);
+                else {
+                  setRole('');
+                  setSelected(null);
+                }
+              } catch (reason) {
+                setError((reason as Error).message);
+              }
             }}
           >
             <span className="profile-avatar">{role.slice(0, 1)}</span>
             <div>
-              <strong>演示{role}</strong>
-              <small>退出 / 切换角色</small>
+              <strong>{identity.name || role}</strong>
+              <small>{identity.demo ? '退出 / 切换角色' : `${role} · 退出登录`}</small>
             </div>
             <LogOut size={17} />
           </button>
@@ -1947,7 +1984,7 @@ export default function App() {
           <div className="top-actions">
             <span>
               <i className="live-dot" />
-              演示版
+              {identity.demo ? '演示版' : '门店版'}
             </span>
             <button
               className="icon-button"
@@ -3002,7 +3039,7 @@ export default function App() {
               <DeviceCatalogManager catalog={catalog} role={role} reload={refreshCatalog} />
               <div className="detail-grid">
                 <section className="panel padded">
-                  <h2>聆序听力 · 演示门店</h2>
+                  <h2>{identity.storeName}</h2>
                   <dl className="stacked-info">
                     <div>
                       <dt>当前角色</dt>
@@ -3010,11 +3047,11 @@ export default function App() {
                     </div>
                     <div>
                       <dt>数据空间</dt>
-                      <dd>独立演示门店</dd>
+                      <dd>{identity.storeName}</dd>
                     </div>
                     <div>
                       <dt>版本</dt>
-                      <dd>Demo 0.1</dd>
+                      <dd>{identity.demo ? '本地演示' : '1.0'}</dd>
                     </div>
                   </dl>
                   <h3>角色权限</h3>
@@ -3059,7 +3096,9 @@ export default function App() {
                   <div className="notice">
                     <ShieldCheck size={20} />
                     <p>
-                      演示登录允许公开切换角色，仅供虚构数据体验。正式使用前需启用真实员工认证、完成权限审核及部署验证。
+                      {identity.demo
+                        ? '演示登录允许公开切换角色，仅供虚构数据体验。'
+                        : `当前员工：${identity.name}（${identity.email}）。权限由管理员分配，操作会记录员工身份。请定期备份数据库及报告附件。`}
                     </p>
                   </div>
                 </section>
@@ -3069,7 +3108,7 @@ export default function App() {
         </div>
         <footer className="app-footer">
           聆序 HEARING CARE <span>让每一次服务，有迹可循。</span>
-          <small>演示数据 · 仅供体验</small>
+          <small>{identity.demo ? '演示数据 · 仅供体验' : '客户资料 · 授权员工访问'}</small>
         </footer>
       </main>
       {toast && (
@@ -3235,7 +3274,7 @@ export default function App() {
                     <input
                       maxLength={30}
                       value={draft.phone}
-                      placeholder="演示时请使用虚构信息"
+                      placeholder="填写客户相关信息"
                       onChange={(e) => change('phone', e.target.value)}
                     />
                   </Field>

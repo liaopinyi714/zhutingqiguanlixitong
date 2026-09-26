@@ -1,18 +1,28 @@
 {
   "name": "hearing-care-workspace",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "packageManager": "pnpm@11.19.0",
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "dev:api": "wrangler dev --port 8787",
-    "db:local": "wrangler d1 migrations apply hearing-care --local",
+    "dev:api": "wrangler dev --config wrangler.demo.jsonc --port 8787",
+    "db:local": "wrangler d1 migrations apply hearing-care --config wrangler.demo.jsonc --local",
+    "configure": "node scripts/configure.mjs",
+    "check:production": "node scripts/check-production.mjs",
+    "db:production": "pnpm check:production && wrangler d1 migrations apply DB --config wrangler.jsonc --remote",
+    "staff:upload": "node scripts/upload-staff.mjs",
+    "backup": "node scripts/backup.mjs",
     "build": "tsc --noEmit && vite build",
     "test": "vitest run",
-    "deploy": "pnpm build && wrangler deploy"
+    "deploy": "pnpm check:production && pnpm build && wrangler deploy --config wrangler.jsonc"
   },
   "dependencies": {
     "hono": "^4.7.0",
+    "jose": "^6.2.12",
     "lucide-react": "^0.468.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",

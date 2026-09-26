@@ -2,6 +2,10 @@ node_modules/
 dist/
 .wrangler/
 .dev.vars
+.dev.vars.*
+config/staff.local.json
+backups/
+.deploy-dry-run/
 .env*
 !.env.example
 *.log

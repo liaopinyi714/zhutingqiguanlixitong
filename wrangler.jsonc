@@ -1,21 +1,39 @@
 {
-  "name": "hearing-care-demo",
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "hearing-care",
   "main": "server/index.ts",
-  "compatibility_date": "2025-09-01",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "preview_urls": false,
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": [
+      "/api/*"
+    ]
   },
-  "vars": { "DEMO_MODE": "true" },
-  "triggers": { "crons": ["0 18 * * *"] },
+  "vars": {
+    "DEMO_MODE": "false",
+    "ACCESS_TEAM_DOMAIN": "REPLACE_ME.cloudflareaccess.com",
+    "ACCESS_AUD": "REPLACE_ME"
+  },
+  "triggers": {
+    "crons": [
+      "0 18 * * *"
+    ]
+  },
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "hearing-care",
+      "database_name": "hearing-care-production",
       "database_id": "00000000-0000-0000-0000-000000000000",
-      "migrations_dir": "migrations",
-    },
+      "migrations_dir": "migrations-production"
+    }
   ],
-  "r2_buckets": [{ "binding": "FILES", "bucket_name": "hearing-care-private" }],
+  "r2_buckets": [
+    {
+      "binding": "FILES",
+      "bucket_name": "hearing-care-production-private"
+    }
+  ]
 }
