@@ -2,9 +2,10 @@ import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { z } from 'zod';
 import { customerSchema, examSchema, fittingSchema, followupSchema, canWrite } from './domain';
+import { purgeExpiredRecords, retentionCutoff } from './retention';
 type Env = { DB: D1Database; FILES: R2Bucket; DEMO_MODE: string };
 type Session = { role: string; tenant_id: string };
-const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
+export const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
 const id = () => crypto.randomUUID();
 app.onError((err, c) => {
   if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
@@ -389,9 +390,9 @@ app.post('/api/intakes', async (c) => {
 app.get('/api/customers/removed', async (c) => {
   if (c.get('session').role !== '店主') return c.json({ error: '只有店主可以查看已删除档案' }, 403);
   const rows = await c.env.DB.prepare(
-    'SELECT * FROM customers WHERE tenant_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
+    'SELECT * FROM customers WHERE tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
   )
-    .bind(c.get('session').tenant_id)
+    .bind(c.get('session').tenant_id, retentionCutoff())
     .all();
   return c.json(rows.results.map(mapCustomer));
 });
@@ -420,9 +421,9 @@ app.post('/api/customers/:id/restore', async (c) => {
     key = c.req.param('id');
   if (s.role !== '店主') return c.json({ error: '只有店主可以恢复客户档案' }, 403);
   const row = await c.env.DB.prepare(
-    'SELECT id FROM customers WHERE id=? AND tenant_id=? AND deleted_at IS NOT NULL',
+    'SELECT id FROM customers WHERE id=? AND tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>?',
   )
-    .bind(key, s.tenant_id)
+    .bind(key, s.tenant_id, retentionCutoff())
     .first();
   if (!row) return c.json({ error: '已删除档案不存在' }, 404);
   await c.env.DB.batch([
@@ -450,7 +451,7 @@ app.get('/api/customers/:id/detail', async (c) => {
   const result = await c.env.DB.batch(
     ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table) =>
       c.env.DB.prepare(
-        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ${['exams', 'fittings', 'followups'].includes(table) ? 'AND deleted_at IS NULL' : ''} ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
+        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ${['exams', 'fittings', 'followups', 'attachments'].includes(table) ? 'AND deleted_at IS NULL' : ''} ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
       ).bind(t, k),
     ),
   );
@@ -604,21 +605,25 @@ app.put('/api/customers/:id/followups/:recordId', async (c) => {
 app.get('/api/customers/:id/removed', async (c) => {
   const tenant = c.get('session').tenant_id,
     customer = c.req.param('id');
-  const [exams, fittings, followups] = await c.env.DB.batch([
+  const [exams, fittings, followups, attachments] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'SELECT id,date,data,deleted_at FROM exams WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
-    ).bind(tenant, customer),
+      'SELECT id,date,data,deleted_at FROM exams WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
+    ).bind(tenant, customer, retentionCutoff()),
     c.env.DB.prepare(
-      'SELECT id,date,data,deleted_at FROM fittings WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
-    ).bind(tenant, customer),
+      'SELECT id,date,data,deleted_at FROM fittings WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
+    ).bind(tenant, customer, retentionCutoff()),
     c.env.DB.prepare(
-      'SELECT * FROM followups WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL ORDER BY deleted_at DESC',
-    ).bind(tenant, customer),
+      'SELECT * FROM followups WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
+    ).bind(tenant, customer, retentionCutoff()),
+    c.env.DB.prepare(
+      'SELECT id,name,size,created_at,deleted_at FROM attachments WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
+    ).bind(tenant, customer, retentionCutoff()),
   ]);
   return c.json({
     exams: exams.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
     fittings: fittings.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
     followups: followups.results,
+    attachments: attachments.results,
   });
 });
 for (const kind of ['exams', 'fittings', 'followups'] as const) {
@@ -661,9 +666,9 @@ for (const kind of ['exams', 'fittings', 'followups'] as const) {
     if (!canWrite(s.role, kind === 'exams' ? 'exam' : kind === 'fittings' ? 'fitting' : 'followup'))
       return c.json({ error: '当前角色无权恢复专业记录' }, 403);
     const existing = await c.env.DB.prepare(
-      `SELECT id FROM ${kind} WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL`,
+      `SELECT id FROM ${kind} WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>?`,
     )
-      .bind(record, customer, s.tenant_id)
+      .bind(record, customer, s.tenant_id, retentionCutoff())
       .first();
     if (!existing) return c.json({ error: '已删除记录不存在' }, 404);
     await c.env.DB.batch([
@@ -767,9 +772,51 @@ app.post('/api/customers/:id/attachments', async (c) => {
   }
   return c.json({ id: k }, 201);
 });
+app.delete('/api/customers/:id/attachments/:recordId', async (c) => {
+  const s = c.get('session'),
+    customer = c.req.param('id'),
+    record = c.req.param('recordId');
+  if (!canWrite(s.role, 'exam')) return c.json({ error: '当前角色无权删除报告附件' }, 403);
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM attachments WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL',
+  )
+    .bind(record, customer, s.tenant_id)
+    .first();
+  if (!existing) return c.json({ error: '附件不存在或已删除' }, 404);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE attachments SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL',
+    ).bind(record, customer, s.tenant_id),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '删除报告附件', customer),
+  ]);
+  return c.json({ ok: true });
+});
+app.post('/api/customers/:id/attachments/:recordId/restore', async (c) => {
+  const s = c.get('session'),
+    customer = c.req.param('id'),
+    record = c.req.param('recordId');
+  if (!canWrite(s.role, 'exam')) return c.json({ error: '当前角色无权恢复报告附件' }, 403);
+  const existing = await c.env.DB.prepare(
+    'SELECT id FROM attachments WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>?',
+  )
+    .bind(record, customer, s.tenant_id, retentionCutoff())
+    .first();
+  if (!existing) return c.json({ error: '已删除附件不存在或超过恢复期限' }, 404);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE attachments SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL',
+    ).bind(record, customer, s.tenant_id),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '恢复报告附件', customer),
+  ]);
+  return c.json({ ok: true });
+});
 app.get('/api/files/:id', async (c) => {
   const r = await c.env.DB.prepare(
-    'SELECT a.* FROM attachments a JOIN customers c ON c.id=a.customer_id AND c.tenant_id=a.tenant_id AND c.deleted_at IS NULL WHERE a.id=? AND a.tenant_id=?',
+    'SELECT a.* FROM attachments a JOIN customers c ON c.id=a.customer_id AND c.tenant_id=a.tenant_id AND c.deleted_at IS NULL WHERE a.id=? AND a.tenant_id=? AND a.deleted_at IS NULL',
   )
     .bind(c.req.param('id'), c.get('session').tenant_id)
     .first<any>();
@@ -810,4 +857,11 @@ app.get('/api/export', async (c) => {
   });
 });
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
-export default app;
+export default {
+  fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    return app.fetch(request, env, ctx);
+  },
+  async scheduled(_controller: ScheduledController, env: Env) {
+    await purgeExpiredRecords(env);
+  },
+} satisfies ExportedHandler<Env>;

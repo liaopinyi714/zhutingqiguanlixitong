@@ -936,6 +936,24 @@
   color: #777;
   font-size: 12px;
 }
+.cf-shell .retention-note {
+  margin: 4px 0 12px;
+  font-size: 12px;
+}
+.cf-shell .attachment-item {
+  min-width: 0;
+}
+.cf-shell .attachment-item .attachment {
+  min-height: 84px;
+  border-color: #e7e7e7;
+  color: #666;
+}
+.cf-shell .attachment-item > .button {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin: 8px 0 0 auto;
+}
 .cf-shell .removed-customer-list > div {
   display: flex;
   align-items: center;

@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { readFileSync } from 'node:fs';
-import app from '../server/index';
+import { app } from '../server/index';
+import { purgeExpiredRecords } from '../server/retention';
 import { frequencies } from '../server/domain';
 let db: DatabaseSync, env: any, cookie: string;
 function statement(sql: string, args: any[] = []): any {
@@ -30,6 +31,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0003_device_catalog.sql', 'utf8'));
   db.exec(readFileSync('migrations/0004_intake_and_corrections.sql', 'utf8'));
   db.exec(readFileSync('migrations/0005_record_lifecycle.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0006_attachment_retention.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -51,7 +53,9 @@ beforeEach(async () => {
     FILES: {
       put: async (key: string, bytes: ArrayBuffer) => files.set(key, bytes),
       get: async (key: string) => (files.has(key) ? { body: files.get(key) } : null),
-      delete: async (key: string) => files.delete(key),
+      delete: async (keys: string | string[]) => {
+        for (const key of Array.isArray(keys) ? keys : [keys]) files.delete(key);
+      },
     },
   };
   cookie = '';
@@ -59,6 +63,105 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('报告删除后无法下载，30 天内可恢复，前台无权删除', async () => {
+    const form = new FormData();
+    form.append(
+      'file',
+      new File(['%PDF-1.4\nfictional'], 'delete-test.pdf', { type: 'application/pdf' }),
+    );
+    const uploaded = await app.request(
+      'http://localhost/api/customers/demo-1/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env,
+    );
+    const fileId = ((await uploaded.json()) as any).id;
+    const frontdesk = await req('/login', 'POST', { role: '前台' });
+    const ownerCookie = cookie;
+    cookie = frontdesk.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req(`/customers/demo-1/attachments/${fileId}`, 'DELETE')).status).toBe(403);
+    cookie = ownerCookie;
+    expect((await req(`/customers/demo-1/attachments/${fileId}`, 'DELETE')).status).toBe(200);
+    expect((await req(`/files/${fileId}`)).status).toBe(404);
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(detail.attachments.some((row: any) => row.id === fileId)).toBe(false);
+    const removed = (await (await req('/customers/demo-1/removed')).json()) as any;
+    expect(removed.attachments.some((row: any) => row.id === fileId)).toBe(true);
+    expect((await req(`/customers/demo-1/attachments/${fileId}/restore`, 'POST')).status).toBe(200);
+    expect((await req(`/files/${fileId}`)).status).toBe(200);
+  });
+  it('过期报告不可恢复，清理同时删除数据库行与 R2 文件', async () => {
+    const form = new FormData();
+    form.append(
+      'file',
+      new File(['%PDF-1.4\nfictional'], 'expired.pdf', { type: 'application/pdf' }),
+    );
+    const uploaded = await app.request(
+      'http://localhost/api/customers/demo-1/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env,
+    );
+    const fileId = ((await uploaded.json()) as any).id;
+    const key = (db.prepare('SELECT object_key FROM attachments WHERE id=?').get(fileId) as any)
+      .object_key;
+    await req(`/customers/demo-1/attachments/${fileId}`, 'DELETE');
+    db.prepare("UPDATE attachments SET deleted_at='2026-01-01 00:00:00' WHERE id=?").run(fileId);
+    expect((await req(`/customers/demo-1/attachments/${fileId}/restore`, 'POST')).status).toBe(404);
+    expect(
+      ((await (await req('/customers/demo-1/removed')).json()) as any).attachments,
+    ).toHaveLength(0);
+    await purgeExpiredRecords(env, new Date('2026-09-26T00:00:00Z'));
+    expect(db.prepare('SELECT id FROM attachments WHERE id=?').get(fileId)).toBeUndefined();
+    expect(await env.FILES.get(key)).toBeNull();
+    expect(db.prepare('SELECT id FROM customers WHERE id=?').get('demo-1')).toBeDefined();
+  });
+  it('到期客户及关联资料彻底清除，未到期删除仍保留', async () => {
+    const form = new FormData();
+    form.append(
+      'file',
+      new File(['%PDF-1.4\nfictional'], 'customer-expired.pdf', { type: 'application/pdf' }),
+    );
+    const uploaded = await app.request(
+      'http://localhost/api/customers/demo-1/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env,
+    );
+    const fileId = ((await uploaded.json()) as any).id;
+    const key = (db.prepare('SELECT object_key FROM attachments WHERE id=?').get(fileId) as any)
+      .object_key;
+    await req('/customers/demo-1', 'DELETE');
+    await req('/customers/demo-2', 'DELETE');
+    db.prepare("UPDATE customers SET deleted_at='2026-01-01 00:00:00' WHERE id='demo-1'").run();
+    expect((await req('/customers/demo-1/restore', 'POST')).status).toBe(404);
+    await purgeExpiredRecords(env, new Date('2026-09-26T00:00:00Z'));
+    expect(db.prepare("SELECT id FROM customers WHERE id='demo-1'").get()).toBeUndefined();
+    for (const table of ['exams', 'fittings', 'followups', 'attachments', 'audit'])
+      expect(
+        (db.prepare(`SELECT COUNT(*) count FROM ${table} WHERE customer_id='demo-1'`).get() as any)
+          .count,
+      ).toBe(0);
+    expect(await env.FILES.get(key)).toBeNull();
+    expect(db.prepare("SELECT id FROM customers WHERE id='demo-2'").get()).toBeDefined();
+    expect((await req('/customers/demo-2/restore', 'POST')).status).toBe(200);
+  });
+  it('单独删除的检查、验配和随访到期后不可恢复并被清理', async () => {
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    const records = [
+      ['exams', detail.exams[0].id],
+      ['fittings', detail.fittings[0].id],
+      ['followups', detail.followups[0].id],
+    ] as const;
+    for (const [table, recordId] of records) {
+      expect((await req(`/customers/demo-1/${table}/${recordId}`, 'DELETE')).status).toBe(200);
+      db.prepare(`UPDATE ${table} SET deleted_at='2026-01-01 00:00:00' WHERE id=?`).run(recordId);
+      expect((await req(`/customers/demo-1/${table}/${recordId}/restore`, 'POST')).status).toBe(
+        404,
+      );
+    }
+    await purgeExpiredRecords(env, new Date('2026-09-26T00:00:00Z'));
+    for (const [table, recordId] of records)
+      expect(db.prepare(`SELECT id FROM ${table} WHERE id=?`).get(recordId)).toBeUndefined();
+    expect(db.prepare("SELECT id FROM customers WHERE id='demo-1'").get()).toBeDefined();
+  });
   it('客户可删除与恢复，关联资料退出普通查询且文件暂不可下载', async () => {
     const form = new FormData();
     form.append('file', new File(['%PDF-1.4\nfictional'], 'demo.pdf', { type: 'application/pdf' }));

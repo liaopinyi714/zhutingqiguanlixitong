@@ -8,6 +8,7 @@
     "run_worker_first": ["/api/*"],
   },
   "vars": { "DEMO_MODE": "true" },
+  "triggers": { "crons": ["0 18 * * *"] },
   "d1_databases": [
     {
       "binding": "DB",

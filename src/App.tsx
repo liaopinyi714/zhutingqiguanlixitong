@@ -102,6 +102,18 @@ const localTime = (value: string) =>
   new Date(value.includes('T') ? value : value.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {
     hour12: false,
   });
+const restoreDeadline = (deletedAt: string) =>
+  new Date(new Date(deletedAt.replace(' ', 'T') + 'Z').getTime() + 30 * 86400000).toLocaleString(
+    'zh-CN',
+    {
+      hour12: false,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    },
+  );
 async function api(path: string, method = 'GET', data?: unknown) {
   const response = await fetch('/api' + path, {
     method,
@@ -1116,10 +1128,16 @@ export default function App() {
     [followups, setFollowups] = useState<Follow[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
-    [removed, setRemoved] = useState<{ exams: any[]; fittings: any[]; followups: Follow[] }>({
+    [removed, setRemoved] = useState<{
+      exams: any[];
+      fittings: any[];
+      followups: Follow[];
+      attachments: any[];
+    }>({
       exams: [],
       fittings: [],
       followups: [],
+      attachments: [],
     }),
     [editingField, setEditingField] = useState(''),
     [editingValue, setEditingValue] = useState(''),
@@ -1392,10 +1410,7 @@ export default function App() {
     customerId = selected,
   ) {
     if (!customerId) return;
-    if (
-      !restore &&
-      !window.confirm('确认删除这条记录？删除后不会出现在档案和统计中，可在本页恢复。')
-    )
+    if (!restore && !window.confirm('确认删除这条记录？删除后可在本页恢复，30 天后自动彻底清除。'))
       return;
     setBusy(true);
     setError('');
@@ -1409,7 +1424,7 @@ export default function App() {
         refresh(),
       ]);
       setExamIndex(0);
-      flash(restore ? '记录已恢复' : '记录已删除，可在本页恢复');
+      flash(restore ? '记录已恢复' : '记录已删除，30 天内可恢复');
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -1420,7 +1435,7 @@ export default function App() {
     if (
       !restore &&
       !window.confirm(
-        '确认删除这位客户的档案？检查、验配、随访和附件会一起从普通列表中隐藏，可从已删除档案恢复。',
+        '确认删除这位客户的档案？检查、验配、随访和附件会一起隐藏，30 天内可恢复，之后自动彻底清除。',
       )
     )
       return;
@@ -1430,7 +1445,29 @@ export default function App() {
       await api(`/customers/${recordId}${restore ? '/restore' : ''}`, restore ? 'POST' : 'DELETE');
       if (!restore && selected === recordId) setSelected(null);
       await refresh();
-      flash(restore ? '客户档案已恢复' : '客户档案已删除，可从列表恢复');
+      flash(restore ? '客户档案已恢复' : '客户档案已删除，30 天内可恢复');
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function changeAttachment(recordId: string, restore = false) {
+    if (!selected) return;
+    if (
+      !restore &&
+      !window.confirm('确认删除这份报告？30 天内可恢复，之后文件将从存储中彻底清除。')
+    )
+      return;
+    setBusy(true);
+    setError('');
+    try {
+      await api(
+        `/customers/${selected}/attachments/${recordId}${restore ? '/restore' : ''}`,
+        restore ? 'POST' : 'DELETE',
+      );
+      await loadDetail(selected);
+      flash(restore ? '报告已恢复' : '报告已删除，30 天内可恢复');
     } catch (reason) {
       setError((reason as Error).message);
     } finally {
@@ -2174,6 +2211,9 @@ export default function App() {
                       {showRemovedCustomers ? '收起' : `查看 ${removedCustomers.length} 位`}
                     </button>
                   </div>
+                  <p className="muted retention-note">
+                    删除后保留 30 天；到期自动彻底清除，之后无法恢复。
+                  </p>
                   {showRemovedCustomers &&
                     (removedCustomers.length ? (
                       <div className="removed-customer-list">
@@ -2182,7 +2222,8 @@ export default function App() {
                             <span>
                               <strong>{item.name}</strong>
                               <small>
-                                {item.phone || '未填写电话'} · 删除于 {item.deleted_at || '—'}
+                                {item.phone || '未填写电话'} · 可恢复至{' '}
+                                {restoreDeadline(item.deleted_at || '')}
                               </small>
                             </span>
                             <button
@@ -2457,8 +2498,8 @@ export default function App() {
                                   <div className="legend">
                                     <span className="ear-right">○ / △ 右气导</span>
                                     <span className="ear-left">× / □ 左气导</span>
-                                    <span>〈 / [ 右骨导</span>
-                                    <span>〉 / ] 左骨导</span>
+                                    <span className="ear-right">〈 / [ 右骨导</span>
+                                    <span className="ear-left">〉 / ] 左骨导</span>
                                     <span>↘ 无反应</span>
                                   </div>
                                   <small className="muted">
@@ -2506,10 +2547,12 @@ export default function App() {
                       {role !== '前台' && removed.exams.length > 0 && (
                         <div className="removed-records">
                           <h3>已删除的检查</h3>
+                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
                           {removed.exams.map((record) => (
                             <div key={record.id}>
                               <span>
-                                {record.date} · {record.conclusion || '听力检查'}
+                                {record.date} · {record.conclusion || '听力检查'} · 可恢复至{' '}
+                                {restoreDeadline(record.deleted_at)}
                               </span>
                               <button
                                 className="button small"
@@ -2590,13 +2633,15 @@ export default function App() {
                       {role !== '前台' && removed.fittings.length > 0 && (
                         <div className="removed-records">
                           <h3>已删除的验配记录</h3>
+                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
                           {removed.fittings.map((record) => (
                             <div key={record.id}>
                               <span>
                                 {record.date} ·{' '}
                                 {[record.brand, record.series, record.model]
                                   .filter(Boolean)
-                                  .join(' · ')}
+                                  .join(' · ')}{' '}
+                                · 可恢复至 {restoreDeadline(record.deleted_at)}
                               </span>
                               <button
                                 className="button small"
@@ -2627,10 +2672,12 @@ export default function App() {
                       {removed.followups.length > 0 && (
                         <div className="removed-records padded">
                           <h3>已删除的随访</h3>
+                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
                           {removed.followups.map((record) => (
                             <div key={record.id}>
                               <span>
-                                {record.due} · {record.type} · {record.note}
+                                {record.due} · {record.type} · {record.note} · 可恢复至{' '}
+                                {restoreDeadline((record as any).deleted_at)}
                               </span>
                               <button
                                 className="button small"
@@ -2671,20 +2718,56 @@ export default function App() {
                       {detail.attachments.length ? (
                         <div className="attachment-list">
                           {detail.attachments.map((a) => (
-                            <a key={a.id} href={'/api/files/' + a.id} className="attachment">
-                              <FileText size={24} />
-                              <div>
-                                <strong>{a.name}</strong>
-                                <small>
-                                  {(a.size / 1024).toFixed(1)} KB · {a.created_at.slice(0, 10)}
-                                </small>
-                              </div>
-                              <ArrowDownToLine size={18} />
-                            </a>
+                            <div key={a.id} className="attachment-item">
+                              <a href={'/api/files/' + a.id} className="attachment">
+                                <FileText size={24} />
+                                <div>
+                                  <strong>{a.name}</strong>
+                                  <small>
+                                    {(a.size / 1024).toFixed(1)} KB · {a.created_at.slice(0, 10)}
+                                  </small>
+                                </div>
+                                <ArrowDownToLine size={18} />
+                              </a>
+                              {role !== '前台' && (
+                                <button
+                                  className="button small danger-button"
+                                  disabled={busy}
+                                  onClick={() => changeAttachment(a.id)}
+                                >
+                                  <Trash2 size={14} />
+                                  删除
+                                </button>
+                              )}
+                            </div>
                           ))}
                         </div>
                       ) : (
                         <Empty text="上传原始报告，与结构化检查数据一起保存" />
+                      )}
+                      {role !== '前台' && removed.attachments.length > 0 && (
+                        <div className="removed-records">
+                          <h3>已删除的报告附件</h3>
+                          <p className="muted retention-note">
+                            删除后保留 30 天，到期自动清除文件。
+                          </p>
+                          {removed.attachments.map((a) => (
+                            <div key={a.id}>
+                              <span>
+                                {a.name} · {(a.size / 1024).toFixed(1)} KB · 可恢复至{' '}
+                                {restoreDeadline(a.deleted_at)}
+                              </span>
+                              <button
+                                className="button small"
+                                disabled={busy}
+                                onClick={() => changeAttachment(a.id, true)}
+                              >
+                                <RotateCcw size={14} />
+                                恢复
+                              </button>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </section>
                   )}
