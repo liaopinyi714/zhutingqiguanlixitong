@@ -1,0 +1,696 @@
+/* Dashboard proportions and surface language follow the user's supplied reference image. */
+.cf-shell {
+  --green: #f48120;
+  --dark: #202020;
+  --line: #e7e7e7;
+  color: #242424;
+  background: #fafafa;
+}
+.cf-shell .sidebar {
+  width: 282px;
+  padding: 18px 13px 16px;
+  background: #fbfbfb;
+  border-right: 1px solid #e8e8e8;
+}
+.cf-shell .sidebar .brand {
+  min-height: 44px;
+  padding: 0 9px;
+  gap: 10px;
+}
+.cf-shell .brand-icon {
+  background: #f48120;
+  border-radius: 7px;
+  width: 33px;
+  height: 33px;
+}
+.cf-shell .brand b {
+  font-size: 20px;
+  letter-spacing: 1px;
+  color: #222;
+}
+.cf-shell .brand small {
+  color: #9c9c9c;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+.cf-shell .sidebar-search {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 41px;
+  gap: 11px;
+  text-align: left;
+  margin: 25px 0 16px;
+  padding: 0 12px;
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 9px;
+  color: #919191;
+  box-shadow: 0 1px 2px #00000008;
+}
+.cf-shell .sidebar-search:hover,
+.cf-shell .home-search:hover {
+  border-color: #b7b7b7;
+  box-shadow: 0 0 0 4px #f1f1f1;
+}
+.cf-shell .sidebar-search span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.cf-shell kbd {
+  font-family: inherit;
+  font-size: 11px;
+  color: #898989;
+  border: 1px solid #e6e6e6;
+  border-radius: 4px;
+  background: #f8f8f8;
+  padding: 2px 5px;
+  white-space: nowrap;
+}
+.cf-shell .sidebar-search kbd {
+  margin-left: auto;
+}
+.cf-shell .store-switch {
+  margin: 0 0 21px;
+  padding: 12px 8px;
+  border-top: 0;
+  border-bottom: 1px solid #ededed;
+}
+.cf-shell .store-mark {
+  background: #f4f4f4;
+  color: #777;
+}
+.cf-shell .store-switch strong {
+  color: #343434;
+  font-size: 12px;
+}
+.cf-shell .store-switch small,
+.cf-shell .nav-caption {
+  color: #999;
+}
+.cf-shell .nav-caption {
+  margin: 5px 0 12px;
+  padding-left: 11px;
+}
+.cf-shell nav {
+  gap: 4px;
+}
+.cf-shell nav button {
+  color: #555;
+  padding: 11px 12px;
+  font-size: 13px;
+  border-radius: 7px;
+}
+.cf-shell nav button:hover {
+  background: #f0f0f0;
+}
+.cf-shell nav button.active {
+  background: #eee;
+  color: #222;
+  font-weight: 600;
+}
+.cf-shell nav button.active b,
+.cf-shell nav button b {
+  background: #e2e2e2;
+  color: #555;
+}
+.cf-shell .demo-box {
+  background: #fff;
+  border-color: #e9e9e9;
+  color: #555;
+}
+.cf-shell .demo-box p {
+  color: #777;
+}
+.cf-shell .demo-dot,
+.cf-shell .live-dot {
+  background: #f48120;
+}
+.cf-shell .profile {
+  border-color: #e9e9e9;
+}
+.cf-shell .profile-avatar,
+.cf-shell .top-avatar {
+  background: #ededed;
+  color: #333;
+}
+.cf-shell .main {
+  margin-left: 282px;
+}
+.cf-shell .topbar {
+  height: 61px;
+  padding: 0 32px;
+  background: #fff;
+  border-color: #e8e8e8;
+}
+.cf-shell .breadcrumb {
+  color: #777;
+  font-size: 12px;
+}
+.cf-shell .breadcrumb strong {
+  color: #323232;
+}
+.cf-shell .top-actions {
+  color: #666;
+}
+.cf-shell .top-actions > span:first-child {
+  background: #fff;
+  border: 1px solid #e8e8e8;
+}
+.cf-shell .notification-dot {
+  background: #f48120;
+}
+.cf-shell .content {
+  max-width: 1280px;
+  padding: 36px 36px 60px;
+  min-height: calc(100vh - 117px);
+}
+.cf-shell .content > .page-heading {
+  margin-bottom: 30px;
+}
+.cf-shell .content > .page-heading h1,
+.cf-shell .customer-title h1 {
+  color: #242424;
+}
+.cf-shell .eyebrow,
+.cf-shell .page-heading p,
+.cf-shell .muted {
+  color: #777;
+}
+.cf-shell .button {
+  border-color: #dcdcdc;
+  color: #2b2b2b;
+  background: #fff;
+}
+.cf-shell .button:hover {
+  background: #f5f5f5;
+  border-color: #bdbdbd;
+}
+.cf-shell .button.primary {
+  background: #f48120;
+  border-color: #f48120;
+  color: #fff;
+  box-shadow: 0 2px 5px #f4812022;
+}
+.cf-shell .button.primary:hover {
+  background: #e9700f;
+}
+.cf-shell .panel,
+.cf-shell .stat {
+  border-color: #e7e7e7;
+  border-radius: 9px;
+  box-shadow: 0 1px 2px #00000005;
+}
+.cf-shell .panel h2,
+.cf-shell .journey-panel h2,
+.cf-shell .stat-value,
+.cf-shell .person strong {
+  color: #2b2b2b;
+}
+.cf-shell .stat-top,
+.cf-shell .stat p {
+  color: #6c6c6c;
+}
+.cf-shell .stat.warning .stat-value {
+  color: #dd711c;
+}
+.cf-shell .text-link,
+.cf-shell .text-link.muted {
+  color: #454545;
+}
+.cf-shell .text-link:hover {
+  color: #ee7622;
+}
+.cf-shell .count,
+.cf-shell .badge {
+  background: #f2f2f2;
+  color: #555;
+}
+.cf-shell .badge i {
+  background: #f48120;
+}
+.cf-shell .customer-table th {
+  background: #fafafa;
+  color: #777;
+  border-color: #ededed;
+}
+.cf-shell .customer-table td {
+  color: #4c4c4c;
+  border-color: #ededed;
+}
+.cf-shell .customer-table tbody tr:hover {
+  background: #f8f8f8;
+}
+.cf-shell .avatar {
+  background: #f3f3f3;
+  color: #555;
+}
+.cf-shell .tabs button.active,
+.cf-shell .detail-tabs button.active {
+  color: #252525;
+}
+.cf-shell .detail-tabs button.active:after {
+  background: #f48120;
+}
+.cf-shell .search,
+.cf-shell .search input {
+  background: #fff;
+}
+.cf-shell .search {
+  border-color: #dedede;
+}
+.cf-shell .bar-track {
+  background: #eee;
+}
+.cf-shell .bar-track i {
+  background: #f48120;
+}
+.cf-shell .journey-panel,
+.cf-shell .care-note {
+  background: #fff;
+}
+.cf-shell .care-note {
+  border: 1px solid #e7e7e7;
+}
+.cf-shell .care-note > div,
+.cf-shell .device-card h3 {
+  color: #333;
+}
+.cf-shell .device-card,
+.cf-shell .exam-readings > div {
+  background: #fafafa;
+  border-color: #e7e7e7;
+}
+.cf-shell .app-footer {
+  border-color: #e8e8e8;
+  color: #777;
+}
+.cf-shell .app-footer > span,
+.cf-shell .app-footer small {
+  color: #999;
+}
+
+.cf-shell .content:has(.home-search) {
+  max-width: 1360px;
+  padding-top: 55px;
+}
+.cf-shell .content:has(.home-search) > .page-heading {
+  max-width: 1180px;
+  margin: 45px auto 34px;
+  display: block;
+  text-align: center;
+  position: relative;
+}
+.cf-shell .content:has(.home-search) > .page-heading .eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.2px;
+  margin-bottom: 14px;
+}
+.cf-shell .content:has(.home-search) > .page-heading h1 {
+  font-size: 35px;
+  line-height: 1.3;
+  font-weight: 650;
+  letter-spacing: -0.4px;
+}
+.cf-shell .content:has(.home-search) > .page-heading p {
+  margin-top: 15px;
+  font-size: 13px;
+}
+.cf-shell .content:has(.home-search) > .page-heading > .button {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+}
+.cf-shell .home-search {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  max-width: 1180px;
+  height: 60px;
+  margin: 0 auto 33px;
+  padding: 0 17px;
+  border: 1px solid #d9d9d9;
+  border-radius: 12px;
+  background: #fff;
+  text-align: left;
+  color: #838383;
+  box-shadow:
+    0 0 0 5px #f2f2f2,
+    0 2px 5px #00000008;
+}
+.cf-shell .home-search span {
+  font-size: 15px;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cf-shell .home-search kbd {
+  margin-left: -8px;
+}
+.cf-shell .home-search kbd:first-of-type {
+  margin-left: auto;
+}
+.cf-shell .home-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  align-items: start;
+  gap: 26px;
+  max-width: 1180px;
+  margin: 0 auto 75px;
+}
+.cf-shell .home-shortcuts section {
+  min-width: 0;
+}
+.cf-shell .home-shortcuts header {
+  display: flex;
+  justify-content: space-between;
+  color: #666;
+  font-size: 13px;
+  margin-bottom: 15px;
+}
+.cf-shell .home-shortcuts header svg {
+  color: #999;
+}
+.cf-shell .home-shortcuts button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 10px;
+  height: 57px;
+  border: 0;
+  border-radius: 9px;
+  background: #f1f1f1;
+  color: #464646;
+  text-align: left;
+  padding: 0 17px;
+  font-size: 13px;
+  margin-bottom: 9px;
+}
+.cf-shell .home-shortcuts button:hover {
+  background: #e8e8e8;
+}
+.cf-shell .home-shortcuts button svg:last-child {
+  margin-left: auto;
+  color: #999;
+}
+.cf-shell .home-shortcuts section:last-child button {
+  border-radius: 0;
+  background: transparent;
+  border-bottom: 1px solid #ebebeb;
+  height: 57px;
+  padding: 0 6px;
+}
+.cf-shell .home-shortcuts section:last-child button:hover {
+  background: #f3f3f3;
+}
+.cf-shell .home-shortcuts button small {
+  color: #949494;
+  margin-left: auto;
+  white-space: nowrap;
+}
+.cf-shell .home-shortcuts section:last-child button svg:last-child {
+  margin-left: 0;
+}
+.cf-shell .home-section-label {
+  display: flex;
+  align-items: baseline;
+  gap: 15px;
+  margin-bottom: 20px;
+}
+.cf-shell .home-section-label h2 {
+  font-size: 17px;
+}
+.cf-shell .home-section-label span {
+  font-size: 12px;
+  color: #929292;
+}
+
+.global-search-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  background: #16161665;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: min(15vh, 140px) 20px 20px;
+}
+.global-search-panel {
+  width: min(700px, 100%);
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 13px;
+  box-shadow: 0 25px 90px #1113;
+  overflow: hidden;
+  color: #252525;
+}
+.global-search-input {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 13px 18px;
+  border-bottom: 1px solid #ebebeb;
+  color: #888;
+}
+.global-search-input input {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  font-size: 16px;
+  box-shadow: none;
+}
+.global-search-input input:focus {
+  border: 0;
+  box-shadow: none;
+}
+.global-search-input button {
+  background: #f5f5f5;
+  border: 0;
+  border-radius: 5px;
+  padding: 5px;
+  color: #777;
+  display: grid;
+  place-items: center;
+}
+.global-search-list {
+  padding: 12px;
+  max-height: 455px;
+  min-height: 150px;
+  overflow: auto;
+}
+.global-search-caption {
+  color: #8a8a8a;
+  font-size: 11px;
+  padding: 8px 11px 11px;
+}
+.global-search-list > button {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  padding: 11px 12px;
+}
+.global-search-list > button:hover,
+.global-search-list > button.active {
+  background: #f3f3f3;
+}
+.search-result-avatar {
+  display: grid;
+  place-items: center;
+  width: 39px;
+  height: 39px;
+  border-radius: 7px;
+  background: #eaeaea;
+  color: #4d4d4d;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.search-result-content {
+  flex: 1;
+  min-width: 0;
+}
+.search-result-content strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 600;
+}
+.search-result-content small {
+  display: block;
+  color: #8a8a8a;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-result-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #8d8d8d;
+  font-size: 11px;
+}
+.search-no-results {
+  padding: 25px 15px 35px;
+  color: #777;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.global-search-panel footer {
+  display: flex;
+  gap: 18px;
+  padding: 10px 20px;
+  border-top: 1px solid #eee;
+  color: #888;
+  font-size: 11px;
+}
+.global-search-panel footer kbd {
+  border: 1px solid #e3e3e3;
+  background: #f7f7f7;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-family: inherit;
+}
+.audiogram {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto;
+}
+
+@media (max-width: 1400px) {
+  .cf-shell .sidebar {
+    width: 238px;
+  }
+  .cf-shell .main {
+    margin-left: 238px;
+  }
+  .cf-shell .content:has(.home-search) {
+    padding-top: 35px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading {
+    margin-top: 26px;
+  }
+}
+@media (max-width: 950px) {
+  .cf-shell .sidebar {
+    width: 76px;
+    padding: 22px 10px;
+  }
+  .cf-shell .sidebar .brand {
+    justify-content: center;
+    padding: 0;
+  }
+  .cf-shell .sidebar .brand > div,
+  .cf-shell .sidebar-search,
+  .cf-shell .store-switch {
+    display: none;
+  }
+  .cf-shell .main {
+    margin-left: 76px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading {
+    text-align: left;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading > .button {
+    right: 0;
+    top: 22px;
+    bottom: auto;
+  }
+  .cf-shell .home-shortcuts {
+    gap: 15px;
+  }
+}
+@media (max-width: 650px) {
+  .cf-shell .sidebar {
+    width: 100%;
+    height: 65px;
+    padding: 5px 8px;
+  }
+  .cf-shell .main {
+    margin-left: 0;
+  }
+  .cf-shell .topbar {
+    height: 58px;
+    padding: 0 16px;
+  }
+  .cf-shell .content {
+    padding: 24px 17px 45px;
+  }
+  .cf-shell .content:has(.home-search) {
+    padding-top: 22px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading {
+    margin: 15px 0 24px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading h1 {
+    font-size: 25px;
+    max-width: none;
+    padding-right: 120px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading p {
+    max-width: none;
+    font-size: 11px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading > .button {
+    top: 30px;
+  }
+  .cf-shell .home-search {
+    height: 58px;
+    padding: 0 13px;
+    margin-bottom: 29px;
+  }
+  .cf-shell .home-search span {
+    font-size: 12px;
+  }
+  .cf-shell .home-search kbd {
+    display: none;
+  }
+  .cf-shell .home-shortcuts {
+    grid-template-columns: 1fr 1fr;
+    margin-bottom: 45px;
+    gap: 14px;
+  }
+  .cf-shell .home-shortcuts section:last-child {
+    grid-column: 1/-1;
+  }
+  .cf-shell .home-shortcuts button {
+    height: 50px;
+    padding: 0 10px;
+    font-size: 11px;
+  }
+  .cf-shell .home-shortcuts section:last-child button {
+    display: inline-flex;
+    width: 100%;
+  }
+  .cf-shell .home-shortcuts section:last-child button:nth-of-type(n + 3) {
+    display: none;
+  }
+  .cf-shell .home-section-label {
+    margin-bottom: 15px;
+  }
+  .global-search-backdrop {
+    padding: 10px;
+  }
+  .global-search-panel {
+    max-height: calc(100vh - 20px);
+  }
+  .global-search-panel footer {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+}
+@media print {
+  .global-search-backdrop,
+  .cf-shell .home-search,
+  .cf-shell .sidebar-search {
+    display: none !important;
+  }
+}

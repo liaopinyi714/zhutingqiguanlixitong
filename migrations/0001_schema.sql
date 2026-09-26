@@ -1,0 +1,11 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE customers (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, name TEXT NOT NULL, gender TEXT NOT NULL, birth_date TEXT NOT NULL, phone TEXT NOT NULL, contact TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, status TEXT NOT NULL, history TEXT NOT NULL DEFAULT '', needs TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX customers_tenant ON customers(tenant_id, name);
+CREATE TABLE exams (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id), date TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE INDEX exams_customer ON exams(tenant_id,customer_id,date);
+CREATE TABLE fittings (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id), date TEXT NOT NULL, data TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE followups (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id), due TEXT NOT NULL, type TEXT NOT NULL, note TEXT NOT NULL, completed INTEGER NOT NULL DEFAULT 0, result TEXT NOT NULL DEFAULT '', completed_at TEXT);
+CREATE INDEX followups_due ON followups(tenant_id,completed,due);
+CREATE TABLE attachments (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, customer_id TEXT NOT NULL REFERENCES customers(id), name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, object_key TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE audit (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, actor TEXT NOT NULL, action TEXT NOT NULL, customer_id TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE sessions (token TEXT PRIMARY KEY, role TEXT NOT NULL, tenant_id TEXT NOT NULL, expires_at INTEGER NOT NULL);

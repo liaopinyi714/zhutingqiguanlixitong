@@ -1,0 +1,311 @@
+import { Hono } from 'hono';
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
+import { customerSchema, examSchema, fittingSchema, followupSchema, canWrite } from './domain';
+type Env = { DB: D1Database; FILES: R2Bucket; DEMO_MODE: string };
+type Session = { role: string; tenant_id: string };
+const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
+const id = () => crypto.randomUUID();
+app.onError((err, c) => {
+  if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
+  console.error(err.message);
+  return c.json({ error: '服务暂时不可用，请稍后重试。' }, 500);
+});
+app.use('/api/*', async (c, next) => {
+  c.header('Cache-Control', 'no-store');
+  c.header('X-Content-Type-Options', 'nosniff');
+  if (!['GET', 'HEAD'].includes(c.req.method)) {
+    const origin = c.req.header('Origin');
+    if (
+      origin &&
+      origin !== new URL(c.req.url).origin &&
+      !(new URL(c.req.url).hostname === '127.0.0.1' && origin === 'http://127.0.0.1:5173')
+    )
+      return c.json({ error: '请求来源不受信任' }, 403);
+  }
+  if (c.req.path === '/api/login') return next();
+  const token = getCookie(c, 'hearing_session');
+  const s = token
+    ? await c.env.DB.prepare('SELECT role,tenant_id FROM sessions WHERE token=? AND expires_at>?')
+        .bind(token, Date.now())
+        .first<Session>()
+    : null;
+  if (!s) return c.json({ error: '请先登录演示工作台' }, 401);
+  c.set('session', s);
+  await next();
+});
+app.post('/api/login', async (c) => {
+  if (c.env.DEMO_MODE !== 'true') return c.json({ error: '演示登录已关闭；正式认证尚未配置' }, 403);
+  const data = await c.req.json();
+  if (!['店主', '验配师', '前台'].includes(data.role))
+    return c.json({ error: '请选择演示角色' }, 400);
+  const token = id() + id();
+  await c.env.DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(Date.now()).run();
+  await c.env.DB.prepare('INSERT INTO sessions VALUES(?,?,?,?)')
+    .bind(token, data.role, 'demo-store', Date.now() + 86400000)
+    .run();
+  setCookie(c, 'hearing_session', token, {
+    httpOnly: true,
+    sameSite: 'Strict',
+    secure: new URL(c.req.url).protocol === 'https:',
+    path: '/',
+    maxAge: 86400,
+  });
+  return c.json({ role: data.role });
+});
+app.get('/api/me', (c) =>
+  c.json({ role: c.get('session').role, demo: c.env.DEMO_MODE === 'true' }),
+);
+app.post('/api/logout', async (c) => {
+  await c.env.DB.prepare('DELETE FROM sessions WHERE token=?')
+    .bind(getCookie(c, 'hearing_session') || '')
+    .run();
+  deleteCookie(c, 'hearing_session', { path: '/' });
+  return c.json({ ok: true });
+});
+const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date });
+app.get('/api/customers', async (c) => {
+  const rows = await c.env.DB.prepare(
+    'SELECT * FROM customers WHERE tenant_id=? ORDER BY created_at DESC,name',
+  )
+    .bind(c.get('session').tenant_id)
+    .all();
+  return c.json(rows.results.map(mapCustomer));
+});
+app.get('/api/search', async (c) => {
+  const query = (c.req.query('q') || '').trim();
+  if (!query) return c.json([]);
+  const pattern = `%${query.replace(/[!%_]/g, (char) => `!${char}`)}%`;
+  if (new TextEncoder().encode(pattern).length > 50)
+    return c.json({ error: '搜索关键词过长，请缩短后重试' }, 400);
+  const rows = await c.env.DB.prepare(
+    `
+    SELECT c.* FROM customers c
+    WHERE c.tenant_id=? AND (
+      c.name LIKE ? ESCAPE '!' OR c.phone LIKE ? ESCAPE '!' OR
+      c.contact LIKE ? ESCAPE '!' OR c.source LIKE ? ESCAPE '!' OR
+      c.history LIKE ? ESCAPE '!' OR c.needs LIKE ? ESCAPE '!' OR
+      EXISTS (SELECT 1 FROM exams e WHERE e.customer_id=c.id AND e.tenant_id=c.tenant_id AND
+        (json_extract(e.data,'$.speech') LIKE ? ESCAPE '!' OR json_extract(e.data,'$.other') LIKE ? ESCAPE '!' OR json_extract(e.data,'$.conclusion') LIKE ? ESCAPE '!')) OR
+      EXISTS (SELECT 1 FROM fittings f WHERE f.customer_id=c.id AND f.tenant_id=c.tenant_id AND
+        (json_extract(f.data,'$.brand') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.model') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.serial') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.notes') LIKE ? ESCAPE '!')) OR
+      EXISTS (SELECT 1 FROM followups u WHERE u.customer_id=c.id AND u.tenant_id=c.tenant_id AND
+        (u.type LIKE ? ESCAPE '!' OR u.note LIKE ? ESCAPE '!' OR u.result LIKE ? ESCAPE '!'))
+    )
+    ORDER BY CASE WHEN c.name LIKE ? ESCAPE '!' THEN 0 WHEN c.phone LIKE ? ESCAPE '!' THEN 1 ELSE 2 END,
+      c.created_at DESC LIMIT 50
+  `,
+  )
+    .bind(c.get('session').tenant_id, ...Array(18).fill(pattern))
+    .all();
+  return c.json(rows.results.map(mapCustomer));
+});
+app.post('/api/customers', async (c) => {
+  const p = customerSchema.safeParse(await c.req.json());
+  if (!p.success) return c.json({ error: '请检查姓名、出生日期和档案内容' }, 400);
+  const s = c.get('session'),
+    d = p.data,
+    key = id();
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?)',
+    ).bind(
+      key,
+      s.tenant_id,
+      d.name,
+      d.gender,
+      d.birthDate,
+      d.phone,
+      d.contact,
+      d.source,
+      d.status,
+      d.history,
+      d.needs,
+    ),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '创建客户档案', key),
+  ]);
+  return c.json({ id: key }, 201);
+});
+app.use('/api/customers/:id/*', async (c, next) => {
+  const r = await c.env.DB.prepare('SELECT id FROM customers WHERE id=? AND tenant_id=?')
+    .bind(c.req.param('id'), c.get('session').tenant_id)
+    .first();
+  if (!r) return c.json({ error: '档案不存在' }, 404);
+  await next();
+});
+app.get('/api/customers/:id/detail', async (c) => {
+  const t = c.get('session').tenant_id,
+    k = c.req.param('id');
+  const result = await c.env.DB.batch(
+    ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table) =>
+      c.env.DB.prepare(
+        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
+      ).bind(t, k),
+    ),
+  );
+  return c.json(
+    Object.fromEntries(
+      ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table, i) => [
+        table,
+        result[i].results.map((r: any) => (r.data ? { ...r, ...JSON.parse(r.data) } : r)),
+      ]),
+    ),
+  );
+});
+app.put('/api/customers/:id/profile', async (c) => {
+  const p = customerSchema.safeParse(await c.req.json());
+  if (!p.success) return c.json({ error: '档案内容不完整' }, 400);
+  const d = p.data,
+    s = c.get('session'),
+    k = c.req.param('id');
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE customers SET name=?,gender=?,birth_date=?,phone=?,contact=?,source=?,status=?,history=?,needs=? WHERE id=? AND tenant_id=?',
+    ).bind(
+      d.name,
+      d.gender,
+      d.birthDate,
+      d.phone,
+      d.contact,
+      d.source,
+      d.status,
+      d.history,
+      d.needs,
+      k,
+      s.tenant_id,
+    ),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '更新客户档案', k),
+  ]);
+  return c.json({ ok: true });
+});
+for (const [path, schema, resource, label] of [
+  ['exams', examSchema, 'exam', '新增听力检查'],
+  ['fittings', fittingSchema, 'fitting', '新增验配记录'],
+  ['followups', followupSchema, 'followup', '安排随访'],
+] as const) {
+  app.post(`/api/customers/:id/${path}`, async (c) => {
+    const s = c.get('session');
+    if (!canWrite(s.role, resource)) return c.json({ error: '当前角色无权填写专业验配记录' }, 403);
+    const p = schema.safeParse(await c.req.json());
+    if (!p.success) return c.json({ error: '记录格式不正确，请检查必填项目及听阈范围' }, 400);
+    const d: any = p.data,
+      k = id(),
+      customer = c.req.param('id');
+    const statement =
+      path === 'followups'
+        ? c.env.DB.prepare(
+            'INSERT INTO followups(id,tenant_id,customer_id,due,type,note) VALUES(?,?,?,?,?,?)',
+          ).bind(k, s.tenant_id, customer, d.due, d.type, d.note)
+        : c.env.DB.prepare(
+            `INSERT INTO ${path}(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)`,
+          ).bind(k, s.tenant_id, customer, d.date, JSON.stringify(d));
+    await c.env.DB.batch([
+      statement,
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, s.role, label, customer),
+    ]);
+    return c.json({ id: k }, 201);
+  });
+}
+app.get('/api/followups', async (c) => {
+  const r = await c.env.DB.prepare(
+    'SELECT f.*,c.name,c.phone FROM followups f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id WHERE f.tenant_id=? ORDER BY f.completed,f.due',
+  )
+    .bind(c.get('session').tenant_id)
+    .all();
+  return c.json(r.results);
+});
+app.put('/api/followups/:id', async (c) => {
+  const d = await c.req.json();
+  if (typeof d.result !== 'string' || !d.result.trim() || d.result.length > 3000)
+    return c.json({ error: '请填写本次回访结果' }, 400);
+  const s = c.get('session');
+  const r = await c.env.DB.prepare('SELECT customer_id FROM followups WHERE id=? AND tenant_id=?')
+    .bind(c.req.param('id'), s.tenant_id)
+    .first<{ customer_id: string }>();
+  if (!r) return c.json({ error: '记录不存在' }, 404);
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE followups SET completed=1,result=?,completed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?',
+    ).bind(d.result, c.req.param('id'), s.tenant_id),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+    ).bind(id(), s.tenant_id, s.role, '完成随访', r.customer_id),
+  ]);
+  return c.json({ ok: true });
+});
+app.post('/api/customers/:id/attachments', async (c) => {
+  if (Number(c.req.header('Content-Length') || 0) > 11 * 1024 * 1024)
+    return c.json({ error: '文件不能超过 10 MB' }, 413);
+  const data = await c.req.formData(),
+    file = data.get('file');
+  if (
+    !(file instanceof File) ||
+    file.size > 10 * 1024 * 1024 ||
+    !['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
+  )
+    return c.json({ error: '支持 10 MB 以内的 PDF、JPG、PNG' }, 400);
+  const bytes = await file.arrayBuffer(),
+    head = new Uint8Array(bytes);
+  const valid =
+    file.type === 'application/pdf'
+      ? String.fromCharCode(...head.slice(0, 5)) === '%PDF-'
+      : file.type === 'image/png'
+        ? head[0] === 137 && head[1] === 80 && head[2] === 78 && head[3] === 71
+        : head[0] === 255 && head[1] === 216 && head[2] === 255;
+  if (!valid) return c.json({ error: '文件内容与格式不符' }, 400);
+  const s = c.get('session'),
+    k = id(),
+    key = `${s.tenant_id}/${c.req.param('id')}/${k}`;
+  await c.env.FILES.put(key, bytes, { httpMetadata: { contentType: file.type } });
+  try {
+    await c.env.DB.batch([
+      c.env.DB.prepare(
+        'INSERT INTO attachments(id,tenant_id,customer_id,name,mime,size,object_key) VALUES(?,?,?,?,?,?,?)',
+      ).bind(k, s.tenant_id, c.req.param('id'), file.name.slice(0, 200), file.type, file.size, key),
+      c.env.DB.prepare(
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      ).bind(id(), s.tenant_id, s.role, '上传检查报告', c.req.param('id')),
+    ]);
+  } catch (e) {
+    await c.env.FILES.delete(key);
+    throw e;
+  }
+  return c.json({ id: k }, 201);
+});
+app.get('/api/files/:id', async (c) => {
+  const r = await c.env.DB.prepare('SELECT * FROM attachments WHERE id=? AND tenant_id=?')
+    .bind(c.req.param('id'), c.get('session').tenant_id)
+    .first<any>();
+  if (!r) return c.json({ error: '文件不存在' }, 404);
+  const obj = await c.env.FILES.get(r.object_key);
+  if (!obj) return c.json({ error: '文件不存在' }, 404);
+  return new Response(obj.body, {
+    headers: {
+      'Content-Type': r.mime,
+      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(r.name)}`,
+      'Cache-Control': 'private, no-store',
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+});
+app.get('/api/export', async (c) => {
+  const s = c.get('session');
+  if (s.role !== '店主') return c.json({ error: '只有店主可以导出全部资料' }, 403);
+  const tables = ['customers', 'exams', 'fittings', 'followups', 'attachments', 'audit'];
+  const rows = await c.env.DB.batch(
+    tables.map((t) => c.env.DB.prepare(`SELECT * FROM ${t} WHERE tenant_id=?`).bind(s.tenant_id)),
+  );
+  return c.json({
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    note: '附件元数据已包含；文件需在客户档案中单独下载。',
+    ...Object.fromEntries(tables.map((t, i) => [t, rows[i].results])),
+  });
+});
+app.notFound((c) => c.json({ error: '接口不存在' }, 404));
+export default app;
