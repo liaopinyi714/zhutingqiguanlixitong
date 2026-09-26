@@ -318,11 +318,6 @@
   margin-top: 15px;
   font-size: 13px;
 }
-.cf-shell .content:has(.home-search) > .page-heading > .button {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-}
 .cf-shell .home-search {
   display: flex;
   align-items: center;
@@ -962,6 +957,20 @@
   align-items: center;
   gap: 6px;
 }
+.cf-shell .note-block .inline-profile-field dt {
+  color: #a1ae94;
+  font-size: 10px;
+  font-weight: 400;
+  margin-bottom: 7px;
+}
+.cf-shell .note-block .inline-profile-field dd {
+  color: #617752;
+  font-size: 12px;
+  line-height: 1.7;
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 .cf-shell .inline-edit-icon,
 .cf-shell .icon-action {
   display: inline-flex;
@@ -1005,6 +1014,208 @@
 .cf-shell .task-actions .icon-action.danger-button:hover {
   background: #fff0ef;
   color: #b44e43;
+}
+.cf-login {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fafafa;
+  color: #242424;
+}
+.cf-login-header {
+  height: 62px;
+  padding: 0 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #fff;
+  border-bottom: 1px solid #e8e8e8;
+}
+.cf-login .brand {
+  gap: 10px;
+  padding: 0;
+}
+.cf-login .brand-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 7px;
+  background: #f48120;
+}
+.cf-login .brand b {
+  color: #222;
+  font-size: 20px;
+  letter-spacing: 1px;
+}
+.cf-login .brand small {
+  color: #999;
+  font-size: 8px;
+  letter-spacing: 1px;
+  margin-top: 2px;
+}
+.cf-login-header-note {
+  color: #888;
+  font-size: 12px;
+}
+.cf-login-main {
+  width: min(720px, calc(100% - 36px));
+  margin: auto;
+  padding: 56px 0;
+}
+.cf-login-intro {
+  text-align: center;
+  margin-bottom: 30px;
+}
+.cf-login-intro .eyebrow {
+  color: #888;
+  font-size: 12px;
+  letter-spacing: 0;
+  margin-bottom: 12px;
+}
+.cf-login-intro h1 {
+  color: #242424;
+  font-size: 34px;
+  letter-spacing: -0.4px;
+}
+.cf-login-intro p {
+  color: #777;
+  font-size: 13px;
+  margin-top: 12px;
+}
+.cf-login-card {
+  padding: 28px 30px 24px;
+  background: #fff;
+  border: 1px solid #e7e7e7;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px #00000008;
+}
+.cf-login-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #777;
+  font-size: 12px;
+}
+.cf-login-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 9px;
+  border: 1px solid #e9e9e9;
+  border-radius: 20px;
+  color: #666;
+  background: #fafafa;
+}
+.cf-login-pill i {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #f48120;
+}
+.cf-role-options {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 22px 0 24px;
+}
+.cf-role-options button {
+  min-height: 111px;
+  padding: 17px 16px;
+  text-align: left;
+  position: relative;
+  background: #fff;
+  border: 1px solid #dedede;
+  border-radius: 8px;
+}
+.cf-role-options button:hover {
+  background: #fffaf5;
+  border-color: #eeb579;
+}
+.cf-role-options button.selected {
+  background: #fff7ef;
+  border-color: #f48120;
+  box-shadow: 0 0 0 1px #f48120;
+}
+.cf-role-options span {
+  display: block;
+  color: #292929;
+  font-size: 15px;
+  font-weight: 600;
+}
+.cf-role-options small {
+  display: block;
+  margin-top: 9px;
+  padding-right: 8px;
+  color: #777;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.cf-role-options svg {
+  position: absolute;
+  right: 14px;
+  top: 15px;
+  color: #f48120;
+}
+.cf-login .button.primary {
+  background: #f48120;
+  border-color: #f48120;
+  color: #fff;
+}
+.cf-login .button.primary:hover {
+  background: #e9700f;
+}
+.cf-login-submit {
+  min-height: 46px;
+  font-size: 13px;
+}
+.cf-login-note {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  color: #888;
+  font-size: 11px;
+  line-height: 1.6;
+}
+.cf-login-note svg {
+  margin-top: 1px;
+  color: #999;
+}
+.cf-login-card .error {
+  margin-top: 16px;
+}
+.cf-login-footer {
+  padding: 17px 24px;
+  border-top: 1px solid #e8e8e8;
+  color: #999;
+  text-align: center;
+  font-size: 11px;
+}
+.cf-login-footer span {
+  padding: 0 8px;
+}
+@media (max-width: 700px) {
+  .cf-login-header {
+    padding: 0 18px;
+  }
+  .cf-login-header-note {
+    display: none;
+  }
+  .cf-login-main {
+    padding: 36px 0;
+  }
+  .cf-login-intro h1 {
+    font-size: 27px;
+  }
+  .cf-login-card {
+    padding: 22px 18px;
+  }
+  .cf-role-options {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+  .cf-role-options button {
+    min-height: 76px;
+  }
 }
 @media (max-width: 700px) {
   .cf-shell .intake-actions {

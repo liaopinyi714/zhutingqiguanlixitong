@@ -1565,45 +1565,38 @@ export default function App() {
     );
   if (!role)
     return (
-      <div className="login">
-        <div className="login-art">
+      <div className="cf-login">
+        <header className="cf-login-header">
           <div className="brand">
             <span className="brand-icon">
-              <Ear />
+              <Ear size={23} />
             </span>
-            <b>聆序</b>
-            <small>HEARING CARE</small>
-          </div>
-          <div className="login-copy">
-            <span className="eyebrow">专注每一次聆听</span>
-            <h1>
-              把服务的细节，
-              <br />
-              留在每一份档案里。
-            </h1>
-            <p>
-              从初次到店，到长久陪伴。
-              <br />
-              让听力检查、验配与回访井然有序。
-            </p>
-            <div className="sound-lines">
-              {Array.from({ length: 28 }, (_, i) => (
-                <i key={i} style={{ height: 30 + Math.sin(i * 0.55) ** 2 * 100 }} />
-              ))}
+            <div>
+              <b>聆序</b>
+              <small>HEARING CARE</small>
             </div>
           </div>
-          <span className="login-footer">助听器门店客户与验配服务管理</span>
-        </div>
-        <div className="login-panel">
-          <div className="login-card">
-            <span className="pill">交互演示 · DEMO</span>
-            <h2>欢迎来到聆序</h2>
-            <p className="muted">选择一个角色，体验门店的日常工作。</p>
-            <div className="role-options">
+          <span className="cf-login-header-note">助听器门店客户服务工作空间</span>
+        </header>
+        <main className="cf-login-main">
+          <div className="cf-login-intro">
+            <span className="eyebrow">客户服务工作台</span>
+            <h1>进入聆序工作台</h1>
+            <p>选择演示角色，查看客户档案、听力检查、验配与随访记录。</p>
+          </div>
+          <section className="cf-login-card">
+            <div className="cf-login-card-head">
+              <span className="cf-login-pill">
+                <i /> 演示空间
+              </span>
+              <span>选择体验角色</span>
+            </div>
+            <div className="cf-role-options">
               {['店主', '验配师', '前台'].map((r) => (
                 <button
                   key={r}
                   className={loginRole === r ? 'selected' : ''}
+                  aria-pressed={loginRole === r}
                   onClick={() => setLoginRole(r)}
                 >
                   <span>{r}</span>
@@ -1619,14 +1612,14 @@ export default function App() {
               ))}
             </div>
             <button
-              className="button primary full"
+              className="button primary full cf-login-submit"
               disabled={busy}
               onClick={async () => {
                 setBusy(true);
                 setError('');
                 try {
                   await api('/login', 'POST', { role: loginRole });
-                  await refresh();
+                  await refresh(loginRole === '店主');
                   setRole(loginRole);
                 } catch (e) {
                   setError((e as Error).message);
@@ -1639,12 +1632,15 @@ export default function App() {
               <ArrowRight size={17} />
             </button>
             {error && <div className="error">{error}</div>}
-            <p className="demo-note">
+            <p className="cf-login-note">
               <ShieldCheck size={16} />
               本演示含虚构客户资料，请勿录入真实个人信息。演示角色可公开切换。
             </p>
-          </div>
-        </div>
+          </section>
+        </main>
+        <footer className="cf-login-footer">
+          聆序 HEARING CARE <span>·</span> 让每一次服务，有迹可循。
+        </footer>
       </div>
     );
   const navs = [
@@ -1960,10 +1956,6 @@ export default function App() {
                     <span className="dot-sep">·</span> 今日有 {todayTasks.length} 项服务待跟进
                   </p>
                 </div>
-                <button className="button primary" onClick={() => openForm('customer')}>
-                  <Plus size={18} />
-                  新建客户
-                </button>
               </div>
               <button className="home-search" onClick={() => setSearchOpen(true)}>
                 <Search size={22} />
@@ -2298,12 +2290,12 @@ export default function App() {
                               <dd>{customer.created_at.slice(0, 10)}</dd>
                             </div>
                           </dl>
-                          <div className="note-block">
+                          <dl className="note-block">
                             {profileField('history', '听力与健康情况', undefined, true)}
-                          </div>
-                          <div className="note-block">
+                          </dl>
+                          <dl className="note-block">
                             {profileField('needs', '聆听需求与期望', undefined, true)}
-                          </div>
+                          </dl>
                         </section>
                         <section className="panel padded space-top">
                           <div className="section-title">
