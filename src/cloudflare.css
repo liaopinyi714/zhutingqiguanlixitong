@@ -694,3 +694,120 @@
     display: none !important;
   }
 }
+.cf-shell .catalog-panel {
+  margin-bottom: 24px;
+}
+.cf-shell .catalog-panel .section-title {
+  margin-bottom: 20px;
+}
+.cf-shell .catalog-panel .section-title p {
+  margin: 7px 0 0;
+}
+.cf-shell .catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.cf-shell .catalog-level {
+  min-width: 0;
+  padding: 16px;
+  background: #fafafa;
+  border: 1px solid #e8e8e8;
+  border-radius: 10px;
+}
+.cf-shell .catalog-level h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 15px;
+}
+.cf-shell .catalog-level h3 small {
+  color: #888;
+  font-weight: 400;
+}
+.cf-shell .catalog-items {
+  display: grid;
+  gap: 7px;
+  min-height: 100px;
+  align-content: start;
+}
+.cf-shell .catalog-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: white;
+  border: 1px solid #ebebeb;
+  border-radius: 7px;
+}
+.cf-shell .catalog-item.selected {
+  border-color: #f3ae72;
+  background: #fff8f2;
+}
+.cf-shell .catalog-select {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: none;
+  text-align: left;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cf-shell .catalog-actions {
+  display: flex;
+  flex: none;
+  gap: 4px;
+}
+.cf-shell .catalog-actions button {
+  padding: 3px 4px;
+  border: 0;
+  background: none;
+  color: #777;
+  font-size: 11px;
+}
+.cf-shell .catalog-actions button:hover {
+  color: #ef7a12;
+}
+.cf-shell .catalog-item form,
+.cf-shell .catalog-add {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+}
+.cf-shell .catalog-item input,
+.cf-shell .catalog-add input {
+  width: 100%;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid #dedede;
+  border-radius: 6px;
+  background: white;
+}
+.cf-shell .catalog-add {
+  margin-top: 14px;
+}
+.cf-shell .catalog-add .button,
+.cf-shell .catalog-item .button {
+  flex: none;
+}
+.cf-shell .catalog-empty {
+  margin: 4px 0;
+  font-size: 13px;
+}
+.cf-shell .catalog-message {
+  color: #b5530e;
+  font-size: 13px;
+}
+.cf-shell .catalog-footnote {
+  margin: 15px 0 0;
+  font-size: 12px;
+}
+@media (max-width: 950px) {
+  .cf-shell .catalog-grid {
+    grid-template-columns: 1fr;
+  }
+  .cf-shell .catalog-items {
+    min-height: 0;
+  }
+}

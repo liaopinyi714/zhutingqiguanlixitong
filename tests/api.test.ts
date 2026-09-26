@@ -27,6 +27,7 @@ beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec(readFileSync('migrations/0001_schema.sql', 'utf8'));
   db.exec(readFileSync('migrations/0002_demo_seed.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0003_device_catalog.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -56,6 +57,81 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('型号字典按品牌、系列、型号管理，验配引用字典并保留历史名称', async () => {
+    const initial = (await (await req('/device-catalog')).json()) as any;
+    expect(initial.brands).toHaveLength(3);
+    const brand = await req('/device-catalog/brands', 'POST', { name: '测试品牌' });
+    expect(brand.status).toBe(201);
+    const brandId = ((await brand.json()) as any).id;
+    expect((await req('/device-catalog/brands', 'POST', { name: '测试品牌' })).status).toBe(409);
+    const series = await req('/device-catalog/series', 'POST', { brandId, name: '体验系列' });
+    expect(series.status).toBe(201);
+    const seriesId = ((await series.json()) as any).id;
+    const model = await req('/device-catalog/models', 'POST', { seriesId, name: 'BTE 100' });
+    expect(model.status).toBe(201);
+    const modelId = ((await model.json()) as any).id;
+    const fitting = await req('/customers/demo-1/fittings', 'POST', {
+      date: '2026-09-26',
+      deviceModelId: modelId,
+      brand: '伪造品牌',
+      model: '伪造型号',
+      side: '双耳',
+      serial: 'DEMO-TEST',
+      amount: 100,
+      warranty: '',
+      notes: '演示字典选择',
+    });
+    expect(fitting.status).toBe(201);
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(detail.fittings[0]).toMatchObject({
+      brand: '测试品牌',
+      series: '体验系列',
+      model: 'BTE 100',
+      deviceModelId: modelId,
+    });
+    const foundBySeries = (await (
+      await req('/search?q=' + encodeURIComponent('体验系列'))
+    ).json()) as any[];
+    expect(foundBySeries.some((row) => row.id === 'demo-1')).toBe(true);
+    expect(
+      (await req('/device-catalog/models/' + modelId, 'PUT', { name: 'BTE 200' })).status,
+    ).toBe(200);
+    const unchanged = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(unchanged.fittings[0].model).toBe('BTE 100');
+    expect((await req('/device-catalog/brands/' + brandId, 'DELETE')).status).toBe(200);
+    const visible = (await (await req('/device-catalog')).json()) as any;
+    expect(visible.models.some((row: any) => row.id === modelId)).toBe(false);
+    const invalid = await req('/customers/demo-1/fittings', 'POST', {
+      date: '2026-09-26',
+      deviceModelId: modelId,
+      brand: '测试品牌',
+      model: 'BTE 200',
+      side: '双耳',
+      serial: '',
+      amount: 0,
+      warranty: '',
+      notes: '测试停用',
+    });
+    expect(invalid.status).toBe(400);
+  });
+  it('型号字典仅店主可维护且跨门店不可引用', async () => {
+    const login = await req('/login', 'POST', { role: '验配师' });
+    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req('/device-catalog/brands', 'POST', { name: '无权限' })).status).toBe(403);
+    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
+      'other-token',
+      '店主',
+      'other-store',
+      Date.now() + 10000,
+    );
+    cookie = 'hearing_session=other-token';
+    expect(((await (await req('/device-catalog')).json()) as any).brands).toEqual([]);
+    expect(
+      (await req('/device-catalog/series', 'POST', { brandId: 'demo-brand-phonak', name: '越权' }))
+        .status,
+    ).toBe(400);
+    expect((await req('/device-catalog/models/demo-model-audeo', 'DELETE')).status).toBe(404);
+  });
   it('跨客户资料、检查结论、设备及随访搜索，并按门店隔离', async () => {
     const cases: [string, string][] = [
       ['陈淑华', 'demo-1'],

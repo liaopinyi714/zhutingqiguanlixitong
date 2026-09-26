@@ -38,7 +38,9 @@ export const examSchema = z.object({
 });
 export const fittingSchema = z.object({
   date: dateSchema,
+  deviceModelId: z.string().max(100).optional(),
   brand: z.string().min(1).max(50),
+  series: z.string().max(80).optional(),
   model: z.string().min(1).max(80),
   side: z.enum(['双耳', '左耳', '右耳']),
   serial: z.string().max(100),
