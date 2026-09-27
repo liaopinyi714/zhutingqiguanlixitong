@@ -81,3 +81,4 @@ wrangler.demo.jsonc  仅本机演示配置
 听力图与平均值用于记录展示，不自动诊断疾病、不自动给出选配处方。内置设备名称仅作示例。
 
 详见 [部署指南](docs/DEPLOYMENT.md) 和 [设计与迁移说明](docs/ARCHITECTURE.md)。
+触发构建
