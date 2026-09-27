@@ -4,6 +4,7 @@ import App from './App';
 import './style.css';
 import './cloudflare.css';
 import './ui-theme.css';
+import './hearing-editor.css';
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <App />

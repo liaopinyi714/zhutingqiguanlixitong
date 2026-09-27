@@ -1,0 +1,322 @@
+.hearing-date {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #666;
+  font-size: 14px;
+  margin: 15px 0 22px;
+}
+.hearing-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 104px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.hearing-ear {
+  min-width: 0;
+  border: 1px solid #e4e4e4;
+  border-radius: 9px;
+  background: #fff;
+  overflow: hidden;
+}
+.hearing-ear header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  padding: 13px 16px;
+  border-bottom: 1px solid #eee;
+}
+.hearing-ear header span {
+  color: #777;
+  font-size: 12px;
+}
+.hearing-ear svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: crosshair;
+}
+.hearing-ear svg text {
+  font:
+    12px Arial,
+    'Microsoft YaHei',
+    sans-serif;
+  fill: #686868;
+}
+.hearing-ear svg .ucl-symbol {
+  font-size: 16px;
+  font-weight: 600;
+  fill: inherit;
+}
+.hearing-ear svg:focus-visible {
+  outline: 2px solid #0866e8;
+  outline-offset: -3px;
+}
+.hearing-cursor {
+  display: none;
+}
+.hearing-ear svg:focus-visible .hearing-cursor {
+  display: block;
+}
+.hearing-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-top: 12px;
+}
+.hearing-tools > span {
+  text-align: center;
+  color: #777;
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.hearing-tools button {
+  padding: 10px 5px;
+  border: 1px solid #ddd;
+  border-radius: 7px;
+  background: #fff;
+  color: #555;
+  font-size: 13px;
+}
+.hearing-tools button b,
+.hearing-tools button small {
+  display: block;
+}
+.hearing-tools button b {
+  font-size: 15px;
+  font-weight: 500;
+}
+.hearing-tools button small {
+  font-size: 12px;
+  margin-top: 4px;
+}
+.hearing-tools button.selected {
+  color: #0866e8;
+  border-color: #0866e8;
+  background: #f5f9ff;
+}
+.hearing-tools label {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #666;
+  font-size: 12px;
+}
+.hearing-tools input {
+  accent-color: #0866e8;
+}
+.hearing-hint {
+  color: #777;
+  font-size: 13px;
+  margin: 15px 0;
+}
+.hearing-notes {
+  border-top: 1px solid #e7e7e7;
+  padding-top: 16px;
+  margin-top: 20px;
+}
+.hearing-notes summary {
+  cursor: pointer;
+  color: #666;
+  font-size: 14px;
+}
+.hearing-notes label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  font-size: 14px;
+  margin-top: 16px;
+  color: #666;
+}
+.hearing-notes textarea {
+  font-size: 15px;
+}
+.hearing-save {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  position: sticky;
+  bottom: 12px;
+  padding: 14px 16px;
+  margin-top: 22px;
+  border: 1px solid #e3e3e3;
+  border-radius: 8px;
+  background: #fff;
+  z-index: 6;
+  box-shadow: 0 2px 12px #0000000a;
+}
+.hearing-save span {
+  margin-right: auto;
+  color: #777;
+  font-size: 13px;
+}
+@media (max-width: 800px) {
+  .hearing-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .hearing-tools {
+    grid-row: 1;
+    flex-direction: row;
+    flex-wrap: wrap;
+    padding: 0 0 4px;
+    position: sticky;
+    top: 0;
+    background: #fff;
+    z-index: 2;
+  }
+  .hearing-tools > span {
+    display: none;
+  }
+  .hearing-tools button {
+    flex: 1;
+    min-width: 70px;
+  }
+  .hearing-tools label {
+    padding: 5px;
+  }
+  .hearing-save {
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 650px) {
+  .hearing-save {
+    bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  }
+  .hearing-date input,
+  .hearing-notes textarea {
+    font-size: 16px;
+  }
+}
+@media print {
+  .hearing-tools,
+  .hearing-save {
+    display: none;
+  }
+  .hearing-workspace {
+    grid-template-columns: 1fr 1fr;
+  }
+  .hearing-ear {
+    break-inside: avoid;
+  }
+  .hearing-notes {
+    display: block;
+  }
+}
+
+/* Keep the inner sidebar layout fixed while its outer clipping width animates. */
+@media (min-width: 651px) {
+  .cf-shell .sidebar,
+  .cf-shell.sidebar-peek .sidebar,
+  .cf-shell.sidebar-collapsed.sidebar-peek .sidebar,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar {
+    padding: 0;
+    overflow: hidden;
+    transition:
+      width 420ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 420ms ease;
+  }
+  .cf-shell .main {
+    transition: margin-left 420ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .cf-shell .sidebar-content {
+    width: var(--sidebar-full-width);
+    padding: 16px 10px 0;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    overflow-x: hidden;
+    scrollbar-width: none;
+  }
+  .cf-shell .sidebar .store-switch,
+  .cf-shell .sidebar .nav-caption {
+    display: none;
+  }
+  .cf-shell .sidebar .brand,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar .brand {
+    justify-content: flex-start;
+    padding: 0 4px;
+    margin: 0;
+  }
+  .cf-shell .sidebar .brand-icon {
+    width: 28px;
+    height: 28px;
+  }
+  .cf-shell .sidebar .brand-icon svg {
+    width: 21px;
+    height: 21px;
+  }
+  .cf-shell .sidebar .sidebar-search,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-search {
+    width: 100%;
+    margin: 18px 0 12px;
+    padding: 0 8px;
+    justify-content: flex-start;
+  }
+  .cf-shell .sidebar nav,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav {
+    gap: 7px;
+  }
+  .cf-shell .sidebar nav button,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav button {
+    justify-content: flex-start;
+    padding: 12px 9px;
+  }
+  .cf-shell .sidebar .brand > div,
+  .cf-shell .sidebar-search span,
+  .cf-shell .sidebar-search kbd,
+  .cf-shell .sidebar nav button span,
+  .cf-shell .sidebar nav button b,
+  .cf-shell .sidebar .demo-box,
+  .cf-shell .sidebar .profile {
+    transition:
+      opacity 260ms ease,
+      visibility 260ms;
+  }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar .brand > div,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-search span,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-search kbd,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) nav button span,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) nav button b,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .demo-box {
+    display: block;
+    opacity: 0;
+    visibility: hidden;
+  }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile {
+    display: flex;
+    opacity: 0;
+    visibility: hidden;
+  }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile > div,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile > svg {
+    display: block;
+  }
+  .cf-shell .sidebar .profile,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile {
+    padding: 19px 6px 0;
+    justify-content: flex-start;
+  }
+  .cf-shell .sidebar .sidebar-toggle,
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-toggle {
+    flex-shrink: 0;
+    height: 50px;
+    padding: 14px 19px;
+    margin: 0;
+    justify-content: flex-start;
+    border-radius: 0;
+  }
+}
+@media (max-width: 650px) {
+  .cf-shell .sidebar-content {
+    display: contents;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cf-shell .sidebar,
+  .cf-shell .main {
+    transition: none !important;
+  }
+}

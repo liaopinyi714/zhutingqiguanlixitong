@@ -64,13 +64,61 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
-  it('维修记录可关联验配设备、修改、检索、删除与恢复', async () => {
-    const fitting = db.prepare("SELECT id FROM fittings WHERE customer_id='demo-1' LIMIT 1").get() as any;
+  it('直接作图保存 UCL 和六频听阈，保留旧频率，不要求文字结论', async () => {
+    const curve = () =>
+      frequencies.map((frequency) => ({
+        frequency,
+        value: frequency === 125 ? 30 : frequency === 1000 ? 45 : null,
+        masked: false,
+        noResponse: false,
+      }));
     const data = {
-      fittingId: fitting.id, occurredDate: '2026-09-20', receivedDate: '2026-09-21',
-      completedDate: '', status: '维修中', problem: '受话器无声', findings: '受话器损坏',
-      workDone: '等待配件', parts: '受话器 1 件', price: 180,
-      warrantyCovered: false, notes: '客户要求短信通知',
+      date: '2026-09-27',
+      right: curve(),
+      left: curve(),
+      boneRight: curve(),
+      boneLeft: curve(),
+      uclRight: curve().map((p) => ({ ...p, value: p.frequency === 1000 ? 95 : null })),
+      uclLeft: curve().map((p) => ({ ...p, value: p.frequency === 2000 ? 100 : null })),
+      speech: '',
+      other: '',
+      conclusion: '',
+    };
+    const response = await req('/customers/demo-1/exams', 'POST', data);
+    expect(response.status).toBe(201);
+    const { id } = (await response.json()) as any;
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    const saved = detail.exams.find((row: any) => row.id === id);
+    expect(saved.uclRight.find((p: any) => p.frequency === 1000).value).toBe(95);
+    expect(saved.right.find((p: any) => p.frequency === 125).value).toBe(30);
+    const edited = {
+      ...saved,
+      uclLeft: saved.uclLeft.map((p: any) => (p.frequency === 2000 ? { ...p, value: null } : p)),
+    };
+    expect((await req('/customers/demo-1/exams/' + id, 'PUT', edited)).status).toBe(200);
+    const updated = (await (await req('/customers/demo-1/detail')).json()) as any;
+    expect(
+      updated.exams.find((r: any) => r.id === id).uclLeft.find((p: any) => p.frequency === 2000)
+        .value,
+    ).toBeNull();
+  });
+  it('维修记录可关联验配设备、修改、检索、删除与恢复', async () => {
+    const fitting = db
+      .prepare("SELECT id FROM fittings WHERE customer_id='demo-1' LIMIT 1")
+      .get() as any;
+    const data = {
+      fittingId: fitting.id,
+      occurredDate: '2026-09-20',
+      receivedDate: '2026-09-21',
+      completedDate: '',
+      status: '维修中',
+      problem: '受话器无声',
+      findings: '受话器损坏',
+      workDone: '等待配件',
+      parts: '受话器 1 件',
+      price: 180,
+      warrantyCovered: false,
+      notes: '客户要求短信通知',
     };
     const created = await req('/customers/demo-1/repairs', 'POST', data);
     expect(created.status).toBe(201);
@@ -80,16 +128,30 @@ describe('演示 API', () => {
     cookie = frontdesk.headers.get('Set-Cookie')!.split(';')[0];
     expect((await req('/customers/demo-1/repairs', 'POST', data)).status).toBe(403);
     cookie = ownerCookie;
-    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].parts).toBe('受话器 1 件');
+    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].parts).toBe(
+      '受话器 1 件',
+    );
     expect(((await (await req('/search?q=受话器无声')).json()) as any[])[0].id).toBe('demo-1');
-    expect((await req(`/customers/demo-1/repairs/${repairId}`, 'PUT', { ...data,
-      completedDate: '2026-09-22', status: '已完成', workDone: '已更换受话器', price: 200,
-    })).status).toBe(200);
+    expect(
+      (
+        await req(`/customers/demo-1/repairs/${repairId}`, 'PUT', {
+          ...data,
+          completedDate: '2026-09-22',
+          status: '已完成',
+          workDone: '已更换受话器',
+          price: 200,
+        })
+      ).status,
+    ).toBe(200);
     expect((await req(`/customers/demo-1/repairs/${repairId}`, 'DELETE')).status).toBe(200);
     expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs).toHaveLength(0);
-    expect(((await (await req('/customers/demo-1/removed')).json()) as any).repairs).toHaveLength(1);
+    expect(((await (await req('/customers/demo-1/removed')).json()) as any).repairs).toHaveLength(
+      1,
+    );
     expect((await req(`/customers/demo-1/repairs/${repairId}/restore`, 'POST')).status).toBe(200);
-    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].price).toBe(200);
+    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].price).toBe(
+      200,
+    );
     await req(`/customers/demo-1/repairs/${repairId}`, 'DELETE');
     db.prepare("UPDATE repairs SET deleted_at='2026-01-01 00:00:00' WHERE id=?").run(repairId);
     await purgeExpiredRecords(env);
@@ -249,7 +311,8 @@ describe('演示 API', () => {
       (
         await req(`/customers/demo-1/fittings/${fitting.id}`, 'PUT', {
           ...fitting,
-          serialLeft: 'DEMO-EDIT-L', serialRight: 'DEMO-EDIT-R',
+          serialLeft: 'DEMO-EDIT-L',
+          serialRight: 'DEMO-EDIT-R',
           warranty: '2026-11-30',
           notes: '更正后的验配说明',
         })
@@ -332,7 +395,8 @@ describe('演示 API', () => {
         series: 'Lumity',
         model: 'Audeo L50-R',
         side: '双耳',
-        serialLeft: 'DEMO-NEW-L', serialRight: 'DEMO-NEW-R',
+        serialLeft: 'DEMO-NEW-L',
+        serialRight: 'DEMO-NEW-R',
         amount: 5000,
         warranty: '2026-10-20',
         notes: '测试验配',
@@ -434,22 +498,51 @@ describe('演示 API', () => {
     expect(restored.fittings).toHaveLength(1);
   });
   it('手填型号与独立序列号支持创建、修改、检索，停用字典接口', async () => {
-    const data = { date: '2026-09-26', brand: '', series: '', model: '手填型号 X1',
-      side: '双耳', serialLeft: 'SN-LEFT-100', serialRight: 'SN-RIGHT-101',
-      amount: 100, warranty: '', notes: '首次验配' };
+    const data = {
+      date: '2026-09-26',
+      brand: '',
+      series: '',
+      model: '手填型号 X1',
+      side: '双耳',
+      serialLeft: 'SN-LEFT-100',
+      serialRight: 'SN-RIGHT-101',
+      amount: 100,
+      warranty: '',
+      notes: '首次验配',
+    };
     expect((await req('/device-catalog')).status).toBe(404);
     const created = await req('/customers/demo-1/fittings', 'POST', data);
     expect(created.status).toBe(201);
-    const { id } = await created.json() as any;
-    let detail = await (await req('/customers/demo-1/detail')).json() as any;
+    const { id } = (await created.json()) as any;
+    let detail = (await (await req('/customers/demo-1/detail')).json()) as any;
     expect(detail.fittings.find((r: any) => r.id === id)).toMatchObject(data);
-    expect((await req('/customers/demo-1/fittings/' + id, 'PUT', { ...data, model: '更正型号 X2', serialRight: 'SN-RIGHT-102' })).status).toBe(200);
-    detail = await (await req('/customers/demo-1/detail')).json() as any;
+    expect(
+      (
+        await req('/customers/demo-1/fittings/' + id, 'PUT', {
+          ...data,
+          model: '更正型号 X2',
+          serialRight: 'SN-RIGHT-102',
+        })
+      ).status,
+    ).toBe(200);
+    detail = (await (await req('/customers/demo-1/detail')).json()) as any;
     expect(detail.fittings.find((r: any) => r.id === id).model).toBe('更正型号 X2');
-    expect((await (await req('/search?q=SN-RIGHT-102')).json() as any[]).some((c) => c.id === 'demo-1')).toBe(true);
-    expect((await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: '' })).status).toBe(400);
-    expect((await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: 'sn-left-100' })).status).toBe(400);
-    expect((await req('/customers/demo-1/fittings', 'POST', { ...data, side: '左耳', serialRight: '' })).status).toBe(201);
+    expect(
+      ((await (await req('/search?q=SN-RIGHT-102')).json()) as any[]).some(
+        (c) => c.id === 'demo-1',
+      ),
+    ).toBe(true);
+    expect(
+      (await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: '' })).status,
+    ).toBe(400);
+    expect(
+      (await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: 'sn-left-100' }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await req('/customers/demo-1/fittings', 'POST', { ...data, side: '左耳', serialRight: '' }))
+        .status,
+    ).toBe(201);
   });
   it('跨客户资料、检查结论、设备及随访搜索，并按门店隔离', async () => {
     const cases: [string, string][] = [

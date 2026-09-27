@@ -34,48 +34,63 @@ export const examSchema = z.object({
   left: curve,
   boneRight: curve,
   boneLeft: curve,
+  uclRight: curve.optional(),
+  uclLeft: curve.optional(),
   speech: z.string().max(2000),
   other: z.string().max(3000),
-  conclusion: z.string().trim().min(1).max(3000),
+  conclusion: z.string().trim().max(3000),
 });
-export const fittingSchema = z.object({
-  date: dateSchema,
-  brand: z.string().trim().max(50).default(''),
-  series: z.string().max(80).optional(),
-  model: z.string().trim().min(1).max(80),
-  side: z.enum(['双耳', '左耳', '右耳']),
-  serialLeft: z.string().trim().max(100).default(''),
-  serialRight: z.string().trim().max(100).default(''),
-  amount: z.number().min(0).max(10000000),
-  warranty: z.union([dateSchema, z.literal('')]),
-  notes: z.string().trim().min(1).max(4000),
-}).refine((d) => d.side === '右耳' || !!d.serialLeft, { message: '请填写左耳序列号' })
+export const fittingSchema = z
+  .object({
+    date: dateSchema,
+    brand: z.string().trim().max(50).default(''),
+    series: z.string().max(80).optional(),
+    model: z.string().trim().min(1).max(80),
+    side: z.enum(['双耳', '左耳', '右耳']),
+    serialLeft: z.string().trim().max(100).default(''),
+    serialRight: z.string().trim().max(100).default(''),
+    amount: z.number().min(0).max(10000000),
+    warranty: z.union([dateSchema, z.literal('')]),
+    notes: z.string().trim().min(1).max(4000),
+  })
+  .refine((d) => d.side === '右耳' || !!d.serialLeft, { message: '请填写左耳序列号' })
   .refine((d) => d.side === '左耳' || !!d.serialRight, { message: '请填写右耳序列号' })
-  .refine((d) => d.side !== '双耳' || d.serialLeft.toLowerCase() !== d.serialRight.toLowerCase(), { message: '左右耳序列号不能相同' })
+  .refine((d) => d.side !== '双耳' || d.serialLeft.toLowerCase() !== d.serialRight.toLowerCase(), {
+    message: '左右耳序列号不能相同',
+  })
   .transform((d) => {
     const serialLeft = d.side === '右耳' ? '' : d.serialLeft;
     const serialRight = d.side === '左耳' ? '' : d.serialRight;
-    return { ...d, serialLeft, serialRight, serial: [serialLeft && `左耳：${serialLeft}`, serialRight && `右耳：${serialRight}`].filter(Boolean).join('；') };
+    return {
+      ...d,
+      serialLeft,
+      serialRight,
+      serial: [serialLeft && `左耳：${serialLeft}`, serialRight && `右耳：${serialRight}`]
+        .filter(Boolean)
+        .join('；'),
+    };
   });
 export const followupSchema = z.object({
   due: dateSchema,
   type: z.enum(['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约']),
   note: z.string().trim().min(1).max(3000),
 });
-export const repairSchema = z.object({
-  fittingId: z.string().min(1),
-  occurredDate: dateSchema,
-  receivedDate: z.union([dateSchema, z.literal('')]),
-  completedDate: z.union([dateSchema, z.literal('')]),
-  status: z.enum(['待送修', '维修中', '已完成', '无法修复']),
-  problem: z.string().trim().min(1).max(3000),
-  findings: z.string().trim().max(3000),
-  workDone: z.string().trim().max(3000),
-  parts: z.string().trim().max(2000),
-  price: z.number().min(0).max(10000000),
-  warrantyCovered: z.boolean(),
-  notes: z.string().trim().max(3000),
-}).refine((r) => !r.receivedDate || r.receivedDate >= r.occurredDate)
+export const repairSchema = z
+  .object({
+    fittingId: z.string().min(1),
+    occurredDate: dateSchema,
+    receivedDate: z.union([dateSchema, z.literal('')]),
+    completedDate: z.union([dateSchema, z.literal('')]),
+    status: z.enum(['待送修', '维修中', '已完成', '无法修复']),
+    problem: z.string().trim().min(1).max(3000),
+    findings: z.string().trim().max(3000),
+    workDone: z.string().trim().max(3000),
+    parts: z.string().trim().max(2000),
+    price: z.number().min(0).max(10000000),
+    warrantyCovered: z.boolean(),
+    notes: z.string().trim().max(3000),
+  })
+  .refine((r) => !r.receivedDate || r.receivedDate >= r.occurredDate)
   .refine((r) => !r.completedDate || (r.receivedDate && r.completedDate >= r.receivedDate))
   .refine((r) => r.status !== '已完成' || !!r.completedDate);
 export function pta(points: { frequency: number; value: number | null; noResponse?: boolean }[]) {
