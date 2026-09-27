@@ -10,6 +10,8 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
+  PanelLeftClose,
+  PanelLeftOpen,
   Ear,
   FileText,
   Headphones,
@@ -1172,7 +1174,16 @@ export default function App() {
     [compare, setCompare] = useState(false),
     [taskFilter, setTaskFilter] = useState('待完成'),
     [loginRole, setLoginRole] = useState('店主'),
+    [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+      try { return window.localStorage.getItem('hearing-sidebar-collapsed') === 'true'; }
+      catch { return false; }
+    }),
+    [sidebarHover, setSidebarHover] = useState(false),
     [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力' });
+  useEffect(() => {
+    try { window.localStorage.setItem('hearing-sidebar-collapsed', String(sidebarCollapsed)); }
+    catch { /* Storage may be unavailable in a private browser session. */ }
+  }, [sidebarCollapsed]);
   const searchTriggerRef = useRef<HTMLButtonElement | null>(null);
   function positionSearch(trigger: HTMLButtonElement) {
     const rect = trigger.getBoundingClientRect();
@@ -1982,8 +1993,15 @@ export default function App() {
     );
   };
   return (
-    <div className="app-shell cf-shell">
-      <aside className="sidebar">
+    <div className={'app-shell cf-shell' + (sidebarCollapsed ? ' sidebar-collapsed' : '') + (sidebarHover && sidebarCollapsed ? ' sidebar-peek' : '')}>
+      <aside
+        className="sidebar"
+        onMouseEnter={() => { if (sidebarCollapsed && window.matchMedia('(hover: hover)').matches) setSidebarHover(true); }}
+        onMouseMove={() => { if (sidebarCollapsed && !sidebarHover && window.matchMedia('(hover: hover)').matches) setSidebarHover(true); }}
+        onMouseLeave={() => setSidebarHover(false)}
+        onFocusCapture={() => { if (sidebarCollapsed) setSidebarHover(true); }}
+        onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSidebarHover(false); }}
+      >
         <div className="brand">
           <span className="brand-icon">
             <Ear size={24} />
@@ -1993,7 +2011,7 @@ export default function App() {
             <small>HEARING CARE</small>
           </div>
         </div>
-        <button className="sidebar-search" onClick={(event) => openSearch(event.currentTarget)}>
+        <button className="sidebar-search" title="搜索客户" aria-label="搜索客户" onClick={(event) => openSearch(event.currentTarget)}>
           <Search size={18} />
           <span>快速搜索客户...</span>
           <kbd>Ctrl K</kbd>
@@ -2010,6 +2028,8 @@ export default function App() {
           {navs.map(([key, label, Icon]) => (
             <button
               key={key}
+              title={label}
+              aria-label={label}
               onClick={() => navigate(key)}
               className={page === key ? 'active' : ''}
             >
@@ -2031,6 +2051,7 @@ export default function App() {
           </div>
           <button
             className="profile"
+            title={identity.demo ? '退出 / 切换角色' : '退出登录'}
             onClick={async () => {
               try {
                 const result = await api('/logout', 'POST');
@@ -2050,6 +2071,19 @@ export default function App() {
               <small>{identity.demo ? '退出 / 切换角色' : `${role} · 退出登录`}</small>
             </div>
             <LogOut size={17} />
+          </button>
+          <button
+            className="sidebar-toggle"
+            type="button"
+            aria-label={sidebarCollapsed ? '固定展开侧栏' : '收起侧栏'}
+            title={sidebarCollapsed ? '固定展开侧栏' : '收起侧栏'}
+            onClick={() => {
+              setSidebarCollapsed((value) => !value);
+              setSidebarHover(false);
+            }}
+          >
+            {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+            <span>{sidebarCollapsed ? '固定展开' : '收起侧栏'}</span>
           </button>
         </div>
       </aside>
