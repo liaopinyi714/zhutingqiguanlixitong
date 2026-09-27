@@ -534,7 +534,7 @@ describe('演示 API', () => {
     ).toBe(true);
     expect(
       (await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: '' })).status,
-    ).toBe(400);
+    ).toBe(201);
     expect(
       (await req('/customers/demo-1/fittings', 'POST', { ...data, serialRight: 'sn-left-100' }))
         .status,
@@ -543,6 +543,61 @@ describe('演示 API', () => {
       (await req('/customers/demo-1/fittings', 'POST', { ...data, side: '左耳', serialRight: '' }))
         .status,
     ).toBe(201);
+  });
+  it('未知生日、设备型号与序列号及服务描述可先留空再补录', async () => {
+    const customer = {
+      name: '待补资料客户',
+      gender: '未填写',
+      birthDate: '',
+      phone: '',
+      source: '',
+      status: '待评估',
+    };
+    const fitting = {
+      date: '2026-09-27',
+      model: '',
+      side: '双耳',
+      amount: 0,
+      warranty: '',
+      notes: '',
+    };
+    const intake = await req('/intakes', 'POST', {
+      customer,
+      fitting,
+      followup: { due: '2026-10-01', type: '适应回访', note: '' },
+    });
+    expect(intake.status).toBe(201);
+    const { id } = (await intake.json()) as any;
+    const detail = (await (await req(`/customers/${id}/detail`)).json()) as any;
+    expect(detail.fittings[0]).toMatchObject({
+      model: '',
+      serialLeft: '',
+      serialRight: '',
+      notes: '',
+    });
+    expect(detail.followups[0].note).toBe('');
+    expect(
+      ((await (await req('/customers')).json()) as any[]).find((row) => row.id === id).birthDate,
+    ).toBe('');
+    const repair = await req(`/customers/${id}/repairs`, 'POST', {
+      fittingId: detail.fittings[0].id,
+      occurredDate: '2026-09-27',
+      receivedDate: '',
+      completedDate: '',
+      status: '已完成',
+      problem: '',
+      findings: '',
+      workDone: '',
+      parts: '',
+      price: 0,
+      warrantyCovered: false,
+      notes: '',
+    });
+    expect(repair.status).toBe(201);
+    expect(
+      (await req(`/customers/${id}/profile`, 'PUT', { ...customer, birthDate: '1975-03-02' }))
+        .status,
+    ).toBe(200);
   });
   it('跨客户资料、检查结论、设备及随访搜索，并按门店隔离', async () => {
     const cases: [string, string][] = [

@@ -85,6 +85,7 @@ const today = () => new Date().toLocaleDateString('sv-SE');
 const age = (date: string) => {
   const d = new Date(date),
     n = new Date();
+  if (!date || Number.isNaN(d.getTime())) return NaN;
   return (
     n.getFullYear() -
     d.getFullYear() -
@@ -435,9 +436,8 @@ function FittingDeviceFields({
           placeholder="选填"
         />
       </Field>
-      <Field label="助听器型号 *" wide>
+      <Field label="助听器型号" wide>
         <input
-          required
           maxLength={80}
           value={value.model || ''}
           onChange={(e) => onChange('model', e.target.value)}
@@ -445,9 +445,8 @@ function FittingDeviceFields({
         />
       </Field>
       {value.side !== '右耳' && (
-        <Field label="左耳助听器序列号（SN） *">
+        <Field label="左耳助听器序列号（SN）">
           <input
-            required
             maxLength={100}
             value={value.serialLeft || ''}
             onChange={(e) => onChange('serialLeft', e.target.value)}
@@ -456,9 +455,8 @@ function FittingDeviceFields({
         </Field>
       )}
       {value.side !== '左耳' && (
-        <Field label="右耳助听器序列号（SN） *">
+        <Field label="右耳助听器序列号（SN）">
           <input
-            required
             maxLength={100}
             value={value.serialRight || ''}
             onChange={(e) => onChange('serialRight', e.target.value)}
@@ -595,10 +593,9 @@ function IntakePage({
                 ))}
               </select>
             </Field>
-            <Field label="出生日期 *">
+            <Field label="出生日期">
               <input
                 type="date"
-                required
                 min="1900-01-01"
                 max={today()}
                 value={profile.birthDate}
@@ -751,18 +748,15 @@ function IntakePage({
                     onChange={(e) => setFitting({ ...fitting, warranty: e.target.value })}
                   />
                 </Field>
-                <Field label="调试、验证与交付说明 *" wide>
+                <Field label="调试、验证与交付说明" wide>
                   <textarea
-                    required
                     value={fitting.notes}
                     onChange={(e) => setFitting({ ...fitting, notes: e.target.value })}
                   />
                 </Field>
               </div>
             ) : (
-              <p className="muted">
-                直接填写型号和每台助听器的序列号，并记录保修、调试和交付信息。
-              </p>
+              <p className="muted">可填写型号、序列号及保修等资料，未知项目以后再补充。</p>
             )}
           </section>
         )}
@@ -801,9 +795,8 @@ function IntakePage({
                   ))}
                 </select>
               </Field>
-              <Field label="计划内容 *" wide>
+              <Field label="计划内容" wide>
                 <textarea
-                  required
                   value={followup.note}
                   onChange={(e) => setFollowup({ ...followup, note: e.target.value })}
                 />
@@ -1121,7 +1114,7 @@ export default function App() {
           : {
               name: '',
               gender: '未填写',
-              birthDate: '1960-01-01',
+              birthDate: '',
               phone: '',
               contact: '',
               contactPhone: '',
@@ -1559,7 +1552,8 @@ export default function App() {
                   <div>
                     <strong>{c.name}</strong>
                     <small>
-                      {c.gender} · {age(c.birthDate)} 岁
+                      {c.gender} ·{' '}
+                      {Number.isFinite(age(c.birthDate)) ? `${age(c.birthDate)} 岁` : '年龄未填写'}
                     </small>
                   </div>
                 </div>
@@ -1691,7 +1685,7 @@ export default function App() {
                 <input
                   autoFocus
                   type={field === 'birthDate' ? 'date' : 'text'}
-                  required={field === 'name' || field === 'birthDate'}
+                  required={field === 'name'}
                   value={editingValue}
                   onChange={(event) => setEditingValue(event.target.value)}
                 />
@@ -2148,7 +2142,10 @@ export default function App() {
                       <Badge status={customer.status} />
                     </div>
                     <p>
-                      {customer.gender} · {age(customer.birthDate)} 岁{' '}
+                      {customer.gender} ·{' '}
+                      {Number.isFinite(age(customer.birthDate))
+                        ? `${age(customer.birthDate)} 岁`
+                        : '年龄未填写'}{' '}
                       <span className="dot-sep">/</span> {customer.phone || '未填写电话'}{' '}
                       <span className="dot-sep">/</span> {customer.source}
                     </p>
@@ -3247,10 +3244,9 @@ export default function App() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="出生日期 *">
+                  <Field label="出生日期">
                     <input
                       type="date"
-                      required
                       max={today()}
                       min="1900-01-01"
                       value={draft.birthDate}
@@ -3354,7 +3350,6 @@ export default function App() {
                   </Field>
                   <Field label="试戴、调试、验证与交付说明" wide>
                     <textarea
-                      required
                       value={draft.notes}
                       onChange={(e) => change('notes', e.target.value)}
                       placeholder="记录调试原因、参数变化、真耳验证、客户反馈及使用指导。"
@@ -3408,9 +3403,8 @@ export default function App() {
                       onChange={(e) => change('completedDate', e.target.value)}
                     />
                   </Field>
-                  <Field label="故障现象 / 客户反馈 *" wide>
+                  <Field label="故障现象 / 客户反馈" wide>
                     <textarea
-                      required
                       value={draft.problem}
                       onChange={(e) => change('problem', e.target.value)}
                     />
@@ -3494,7 +3488,6 @@ export default function App() {
                   </Field>
                   <Field label="计划内容" wide>
                     <textarea
-                      required
                       value={draft.note}
                       onChange={(e) => change('note', e.target.value)}
                       placeholder="本次需要关注的问题、希望了解的佩戴反馈…"
