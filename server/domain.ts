@@ -55,6 +55,22 @@ export const followupSchema = z.object({
   type: z.enum(['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约']),
   note: z.string().trim().min(1).max(3000),
 });
+export const repairSchema = z.object({
+  fittingId: z.string().min(1),
+  occurredDate: dateSchema,
+  receivedDate: z.union([dateSchema, z.literal('')]),
+  completedDate: z.union([dateSchema, z.literal('')]),
+  status: z.enum(['待送修', '维修中', '已完成', '无法修复']),
+  problem: z.string().trim().min(1).max(3000),
+  findings: z.string().trim().max(3000),
+  workDone: z.string().trim().max(3000),
+  parts: z.string().trim().max(2000),
+  price: z.number().min(0).max(10000000),
+  warrantyCovered: z.boolean(),
+  notes: z.string().trim().max(3000),
+}).refine((r) => !r.receivedDate || r.receivedDate >= r.occurredDate)
+  .refine((r) => !r.completedDate || (r.receivedDate && r.completedDate >= r.receivedDate))
+  .refine((r) => r.status !== '已完成' || !!r.completedDate);
 export function pta(points: { frequency: number; value: number | null; noResponse?: boolean }[]) {
   const selected = [500, 1000, 2000, 4000].map((f) => points.find((p) => p.frequency === f));
   return selected.some((p) => !p || p.value === null || p.noResponse)

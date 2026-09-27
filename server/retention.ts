@@ -35,6 +35,10 @@ export async function purgeExpiredRecords(
   }
   const expiredParent =
     'customer_id IN (SELECT id FROM customers WHERE deleted_at IS NOT NULL AND deleted_at<=?)';
+  await env.DB.prepare(
+    `DELETE FROM repairs WHERE (deleted_at IS NOT NULL AND deleted_at<=?) OR ${expiredParent}
+      OR fitting_id IN (SELECT id FROM fittings WHERE deleted_at IS NOT NULL AND deleted_at<=?)`,
+  ).bind(cutoff, cutoff, cutoff).run();
   for (const table of ['exams', 'fittings', 'followups'] as const) {
     await env.DB.prepare(
       `DELETE FROM ${table} WHERE (deleted_at IS NOT NULL AND deleted_at<=?) OR ${expiredParent}`,

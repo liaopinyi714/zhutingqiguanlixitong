@@ -71,6 +71,7 @@ type Follow = {
 type Detail = {
   exams: Exam[];
   fittings: any[];
+  repairs: any[];
   followups: Follow[];
   attachments: any[];
   audit: any[];
@@ -1140,11 +1141,13 @@ export default function App() {
     [removed, setRemoved] = useState<{
       exams: any[];
       fittings: any[];
+      repairs: any[];
       followups: Follow[];
       attachments: any[];
     }>({
       exams: [],
       fittings: [],
+      repairs: [],
       followups: [],
       attachments: [],
     }),
@@ -1153,6 +1156,7 @@ export default function App() {
     [tab, setTab] = useState('概览'),
     [search, setSearch] = useState(''),
     [searchOpen, setSearchOpen] = useState(false),
+    [searchPosition, setSearchPosition] = useState({ top: 80, left: 12, width: 360, maxHeight: 520 }),
     [globalQuery, setGlobalQuery] = useState(''),
     [globalResults, setGlobalResults] = useState<Customer[]>([]),
     [searchBusy, setSearchBusy] = useState(false),
@@ -1169,6 +1173,29 @@ export default function App() {
     [taskFilter, setTaskFilter] = useState('待完成'),
     [loginRole, setLoginRole] = useState('店主'),
     [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力' });
+  const searchTriggerRef = useRef<HTMLButtonElement | null>(null);
+  function positionSearch(trigger: HTMLButtonElement) {
+    const rect = trigger.getBoundingClientRect();
+    const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
+    const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+    const mobile = viewportWidth <= 650;
+    const width = Math.min(
+      viewportWidth - 24,
+      mobile
+        ? viewportWidth - 24
+        : Math.max(rect.width, trigger.classList.contains('sidebar-search') ? 480 : rect.width),
+    );
+    const left = mobile && trigger.classList.contains('mobile-search')
+      ? 12
+      : Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
+    const top = mobile && trigger.classList.contains('mobile-search') ? 63 : Math.max(10, rect.top);
+    setSearchPosition({ top, left, width, maxHeight: Math.max(155, viewportHeight - top - 12) });
+  }
+  function openSearch(trigger: HTMLButtonElement) {
+    searchTriggerRef.current = trigger;
+    positionSearch(trigger);
+    setSearchOpen(true);
+  }
   const customer = customers.find((c) => c.id === selected),
     pending = followups.filter((f) => !f.completed),
     overdue = pending.filter((f) => f.due < today()),
@@ -1289,17 +1316,40 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
-        if (role) setSearchOpen(true);
+        if (role) {
+          const selector = window.innerWidth <= 650
+            ? '.mobile-search'
+            : page === 'overview'
+              ? '.home-search'
+              : '.sidebar-search';
+          const trigger = document.querySelector<HTMLButtonElement>(selector);
+          if (trigger) openSearch(trigger);
+        }
       }
       if (event.key === 'Escape') setSearchOpen(false);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [role]);
+  }, [role, page]);
+  useEffect(() => {
+    if (!searchOpen) return;
+    const update = () => {
+      if (searchTriggerRef.current?.isConnected) positionSearch(searchTriggerRef.current);
+    };
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    window.visualViewport?.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+      window.visualViewport?.removeEventListener('resize', update);
+    };
+  }, [searchOpen]);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [page, selected]);
   function navigate(next: string) {
+    setSearchOpen(false);
     setPage(next);
     setSelected(null);
     setSearch('');
@@ -1392,6 +1442,33 @@ export default function App() {
             },
       );
     }
+    if (kind === 'repair')
+      setDraft(
+        record?.id
+          ? {
+              ...record,
+              fittingId: record.fitting_id,
+              occurredDate: record.occurred_date,
+              receivedDate: record.received_date,
+              completedDate: record.completed_date,
+              workDone: record.work_done,
+              warrantyCovered: !!record.warranty_covered,
+            }
+          : {
+              fittingId: record?.fittingId || detail?.fittings[0]?.id || '',
+              occurredDate: today(),
+              receivedDate: today(),
+              completedDate: '',
+              status: '待送修',
+              problem: '',
+              findings: '',
+              workDone: '',
+              parts: '',
+              price: 0,
+              warrantyCovered: false,
+              notes: '',
+            },
+      );
     if (kind === 'followup')
       setDraft(
         record
@@ -1421,7 +1498,7 @@ export default function App() {
     flash('客户档案及所选服务记录已保存');
   }
   async function changeRecord(
-    kind: 'exams' | 'fittings' | 'followups',
+    kind: 'exams' | 'fittings' | 'followups' | 'repairs',
     recordId: string,
     restore = false,
     customerId = selected,
@@ -1452,7 +1529,7 @@ export default function App() {
     if (
       !restore &&
       !window.confirm(
-        '确认删除这位客户的档案？检查、验配、随访和附件会一起隐藏，30 天内可恢复，之后自动彻底清除。',
+        '确认删除这位客户的档案？检查、验配、维修、随访和附件会一起隐藏，30 天内可恢复，之后自动彻底清除。',
       )
     )
       return;
@@ -1536,6 +1613,12 @@ export default function App() {
             amount: Number(draft.amount),
           },
         );
+      if (modal === 'repair')
+        await api(
+          `/customers/${selected}/repairs${draft.id ? '/' + draft.id : ''}`,
+          draft.id ? 'PUT' : 'POST',
+          { ...draft, price: Number(draft.price) },
+        );
       if (modal === 'followup')
         await api(
           `/customers/${draft.customerId}/followups${draft.id ? '/' + draft.id : ''}`,
@@ -1562,6 +1645,7 @@ export default function App() {
         );
       }
       if (modal === 'fitting') setTab('验配记录');
+      if (modal === 'repair') setTab('维修记录');
       if (modal === 'customer') {
         setPage('customers');
         setTab('概览');
@@ -1612,8 +1696,8 @@ export default function App() {
   );
   if (boot)
     return (
-      <div className="loading">
-        <Ear size={36} />
+      <div className="loading cf-loading">
+        <span className="brand-icon"><Ear size={26} /></span>
         <p>正在打开聆序工作台…</p>
       </div>
     );
@@ -1909,7 +1993,7 @@ export default function App() {
             <small>HEARING CARE</small>
           </div>
         </div>
-        <button className="sidebar-search" onClick={() => setSearchOpen(true)}>
+        <button className="sidebar-search" onClick={(event) => openSearch(event.currentTarget)}>
           <Search size={18} />
           <span>快速搜索客户...</span>
           <kbd>Ctrl K</kbd>
@@ -1982,6 +2066,13 @@ export default function App() {
             )}
           </div>
           <div className="top-actions">
+            <button
+              className="icon-button mobile-search"
+              aria-label="搜索客户"
+              onClick={(event) => openSearch(event.currentTarget)}
+            >
+              <Search size={19} />
+            </button>
             <span>
               <i className="live-dot" />
               {identity.demo ? '演示版' : '门店版'}
@@ -2031,7 +2122,7 @@ export default function App() {
                   </p>
                 </div>
               </div>
-              <button className="home-search" onClick={() => setSearchOpen(true)}>
+              <button className="home-search" onClick={(event) => openSearch(event.currentTarget)}>
                 <Search size={22} />
                 <span>搜索客户姓名、电话、检查结果、设备或随访记录...</span>
                 <kbd>Ctrl</kbd>
@@ -2328,7 +2419,7 @@ export default function App() {
                 </div>
               </section>
               <div className="detail-tabs">
-                {['概览', '听力检查', '验配记录', '随访记录', '报告附件'].map((t) => (
+                {['概览', '听力检查', '验配记录', '维修记录', '随访记录', '报告附件'].map((t) => (
                   <button key={t} className={tab === t ? 'active' : ''} onClick={() => setTab(t)}>
                     {t}
                     {t === '听力检查' && detail && <span>{detail.exams.length}</span>}
@@ -2637,6 +2728,11 @@ export default function App() {
                                   </button>
                                 )}
                                 {role !== '前台' && (
+                                  <button className="button small" onClick={() => openForm('repair', { fittingId: f.id })}>
+                                    登记维修
+                                  </button>
+                                )}
+                                {role !== '前台' && (
                                   <button
                                     className="button small danger-button"
                                     disabled={busy}
@@ -2689,6 +2785,62 @@ export default function App() {
                               </button>
                             </div>
                           ))}
+                        </div>
+                      )}
+                    </section>
+                  )}
+                  {tab === '维修记录' && (
+                    <section className="panel padded">
+                      <div className="section-title">
+                        <div>
+                          <h2>助听器维修记录</h2>
+                          <p className="muted">按验配设备记录故障、处理、更换零件与费用。</p>
+                        </div>
+                        {role !== '前台' && (
+                          <button className="button primary" disabled={!detail.fittings.length} onClick={() => openForm('repair')}>
+                            <Plus size={16} /> 登记维修
+                          </button>
+                        )}
+                      </div>
+                      {!detail.fittings.length && <div className="notice">请先录入这位客户的验配设备，再登记维修。</div>}
+                      {detail.repairs.map((r) => {
+                        const fitting = detail.fittings.find((f) => f.id === r.fitting_id);
+                        return (
+                          <article className="record-card" key={r.id}>
+                            <div className="record-heading">
+                              <div>
+                                <span className="eyebrow">故障日期 {r.occurred_date} · {r.status}</span>
+                                <h3>{[fitting?.brand, fitting?.series, fitting?.model].filter(Boolean).join(' · ')}</h3>
+                                <p className="muted">{fitting?.side} · 序列号 {fitting?.serial || '未填写'}</p>
+                              </div>
+                              {role !== '前台' && <div className="record-actions">
+                                <button className="button small" onClick={() => openForm('repair', r)}><Pencil size={14} /> 编辑</button>
+                                <button className="button small danger-button" disabled={busy} onClick={() => changeRecord('repairs', r.id)}>删除</button>
+                              </div>}
+                            </div>
+                            <dl className="info-grid">
+                              <div><dt>接收日期</dt><dd>{r.received_date || '未填写'}</dd></div>
+                              <div><dt>完工日期</dt><dd>{r.completed_date || '未填写'}</dd></div>
+                              <div><dt>维修费用</dt><dd>¥ {money(r.price)}</dd></div>
+                              <div><dt>保修处理</dt><dd>{r.warranty_covered ? '保修范围内' : '非保修'}</dd></div>
+                            </dl>
+                            <p className="record-note"><strong>故障：</strong>{r.problem}</p>
+                            {r.findings && <p className="record-note"><strong>检测：</strong>{r.findings}</p>}
+                            {r.work_done && <p className="record-note"><strong>维修：</strong>{r.work_done}</p>}
+                            {r.parts && <p className="record-note"><strong>更换零件：</strong>{r.parts}</p>}
+                            {r.notes && <p className="record-note"><strong>备注：</strong>{r.notes}</p>}
+                          </article>
+                        );
+                      })}
+                      {!detail.repairs.length && detail.fittings.length > 0 && <Empty text="暂无维修记录" />}
+                      {role !== '前台' && removed.repairs.length > 0 && (
+                        <div className="removed-records">
+                          <h3>已删除的维修记录</h3>
+                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
+                          {removed.repairs.map((r) => <div key={r.id}>
+                            <span>{r.occurred_date} · {r.problem} · 可恢复至 {restoreDeadline(r.deleted_at)}</span>
+                            <button className="button small" disabled={busy} onClick={() => changeRecord('repairs', r.id, true)}>恢复</button>
+                          </div>)}
                         </div>
                       )}
                     </section>
@@ -3067,7 +3219,7 @@ export default function App() {
                     <tbody>
                       {[
                         ['客户与随访', '✓', '✓', '✓'],
-                        ['检查与验配录入', '✓', '✓', '—'],
+                        ['检查、验配与维修', '✓', '✓', '—'],
                         ['型号字典维护', '✓', '—', '—'],
                         ['报告上传与查看', '✓', '✓', '✓'],
                         ['全量档案导出', '✓', '—', '—'],
@@ -3087,7 +3239,7 @@ export default function App() {
                     <ArrowDownToLine size={20} />
                   </div>
                   <p className="muted paragraph">
-                    导出客户、听力检查、验配、随访、助听器型号字典与操作记录的 JSON
+                    导出客户、听力检查、验配、维修、随访、助听器型号字典与操作记录的 JSON
                     数据。包含附件目录；原始报告请在客户档案中单独下载。
                   </p>
                   <button className="button full" disabled={role !== '店主'} onClick={exportData}>
@@ -3126,8 +3278,9 @@ export default function App() {
         >
           <section
             className="global-search-panel"
+            style={searchPosition}
             role="dialog"
-            aria-modal="true"
+            aria-modal="false"
             aria-label="搜索客户信息"
           >
             <div className="global-search-input">
@@ -3135,7 +3288,7 @@ export default function App() {
               <input
                 autoFocus
                 aria-label="搜索客户信息"
-                placeholder="搜索姓名、电话、检查结论、设备或随访..."
+                placeholder="搜索姓名、电话、检查、设备、维修或随访..."
                 value={globalQuery}
                 maxLength={80}
                 onChange={(e) => {
@@ -3221,6 +3374,7 @@ export default function App() {
               customer: draft.id ? '编辑客户档案' : '新建客户档案',
               exam: draft.id ? '编辑听力检查' : '录入听力检查',
               fitting: draft.id ? '编辑验配记录' : '新增验配记录',
+              repair: draft.id ? '编辑维修记录' : '登记设备维修',
               followup: draft.id ? '编辑随访与预约' : '安排随访与预约',
               complete: '记录随访结果',
             }[modal] || ''
@@ -3592,6 +3746,32 @@ export default function App() {
                       placeholder="记录调试原因、参数变化、真耳验证、客户反馈及使用指导。"
                     />
                   </Field>
+                </div>
+              )}
+              {modal === 'repair' && (
+                <div className="form-grid">
+                  <Field label="关联验配设备 *" wide>
+                    <select required value={draft.fittingId} onChange={(e) => change('fittingId', e.target.value)}>
+                      {detail?.fittings.map((f) => <option key={f.id} value={f.id}>
+                        {[f.brand, f.series, f.model, f.side, f.serial].filter(Boolean).join(' · ')}
+                      </option>)}
+                    </select>
+                  </Field>
+                  <Field label="故障发生日期 *"><input type="date" required value={draft.occurredDate} onChange={(e) => change('occurredDate', e.target.value)} /></Field>
+                  <Field label="门店接收日期"><input type="date" value={draft.receivedDate} onChange={(e) => change('receivedDate', e.target.value)} /></Field>
+                  <Field label="维修状态">
+                    <select value={draft.status} onChange={(e) => change('status', e.target.value)}>
+                      {['待送修', '维修中', '已完成', '无法修复'].map((v) => <option key={v}>{v}</option>)}
+                    </select>
+                  </Field>
+                  <Field label="完工日期"><input type="date" value={draft.completedDate} onChange={(e) => change('completedDate', e.target.value)} /></Field>
+                  <Field label="故障现象 / 客户反馈 *" wide><textarea required value={draft.problem} onChange={(e) => change('problem', e.target.value)} /></Field>
+                  <Field label="检测结果" wide><textarea value={draft.findings} onChange={(e) => change('findings', e.target.value)} /></Field>
+                  <Field label="维修过程与处理结果" wide><textarea value={draft.workDone} onChange={(e) => change('workDone', e.target.value)} /></Field>
+                  <Field label="更换零件及数量" wide><textarea value={draft.parts} onChange={(e) => change('parts', e.target.value)} placeholder="例如：左耳受话器 1 件、耳塞 2 件" /></Field>
+                  <Field label="维修费用（元）"><input type="number" min="0" max="10000000" step="0.01" value={draft.price} onChange={(e) => change('price', e.target.value)} /></Field>
+                  <Field label="保修处理"><select value={draft.warrantyCovered ? '是' : '否'} onChange={(e) => change('warrantyCovered', e.target.value === '是')}><option>否</option><option>是</option></select></Field>
+                  <Field label="备注" wide><textarea value={draft.notes} onChange={(e) => change('notes', e.target.value)} /></Field>
                 </div>
               )}
               {modal === 'followup' && (

@@ -32,6 +32,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0004_intake_and_corrections.sql', 'utf8'));
   db.exec(readFileSync('migrations/0005_record_lifecycle.sql', 'utf8'));
   db.exec(readFileSync('migrations/0006_attachment_retention.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0008_repairs.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -63,6 +64,37 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('维修记录可关联验配设备、修改、检索、删除与恢复', async () => {
+    const fitting = db.prepare("SELECT id FROM fittings WHERE customer_id='demo-1' LIMIT 1").get() as any;
+    const data = {
+      fittingId: fitting.id, occurredDate: '2026-09-20', receivedDate: '2026-09-21',
+      completedDate: '', status: '维修中', problem: '受话器无声', findings: '受话器损坏',
+      workDone: '等待配件', parts: '受话器 1 件', price: 180,
+      warrantyCovered: false, notes: '客户要求短信通知',
+    };
+    const created = await req('/customers/demo-1/repairs', 'POST', data);
+    expect(created.status).toBe(201);
+    const repairId = ((await created.json()) as any).id;
+    const ownerCookie = cookie;
+    const frontdesk = await req('/login', 'POST', { role: '前台' });
+    cookie = frontdesk.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req('/customers/demo-1/repairs', 'POST', data)).status).toBe(403);
+    cookie = ownerCookie;
+    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].parts).toBe('受话器 1 件');
+    expect(((await (await req('/search?q=受话器无声')).json()) as any[])[0].id).toBe('demo-1');
+    expect((await req(`/customers/demo-1/repairs/${repairId}`, 'PUT', { ...data,
+      completedDate: '2026-09-22', status: '已完成', workDone: '已更换受话器', price: 200,
+    })).status).toBe(200);
+    expect((await req(`/customers/demo-1/repairs/${repairId}`, 'DELETE')).status).toBe(200);
+    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs).toHaveLength(0);
+    expect(((await (await req('/customers/demo-1/removed')).json()) as any).repairs).toHaveLength(1);
+    expect((await req(`/customers/demo-1/repairs/${repairId}/restore`, 'POST')).status).toBe(200);
+    expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].price).toBe(200);
+    await req(`/customers/demo-1/repairs/${repairId}`, 'DELETE');
+    db.prepare("UPDATE repairs SET deleted_at='2026-01-01 00:00:00' WHERE id=?").run(repairId);
+    await purgeExpiredRecords(env);
+    expect(db.prepare('SELECT id FROM repairs WHERE id=?').get(repairId)).toBeUndefined();
+  });
   it('报告删除后无法下载，30 天内可恢复，前台无权删除', async () => {
     const form = new FormData();
     form.append(
