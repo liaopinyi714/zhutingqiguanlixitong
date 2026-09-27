@@ -94,187 +94,6 @@ app.post('/api/logout', async (c) => {
   return c.json({ ok: true });
 });
 const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date, contactPhone: r.contact_phone });
-async function normalizeFitting(db: D1Database, tenant: string, data: any) {
-  if (!data.deviceModelId) return data;
-  const selected = await db
-    .prepare(
-      `SELECT m.name model,s.name series,b.name brand
-     FROM device_models m JOIN device_series s ON s.id=m.series_id AND s.tenant_id=m.tenant_id
-     JOIN device_brands b ON b.id=s.brand_id AND b.tenant_id=s.tenant_id
-     WHERE m.id=? AND m.tenant_id=? AND m.active=1 AND s.active=1 AND b.active=1`,
-    )
-    .bind(data.deviceModelId, tenant)
-    .first<{ brand: string; series: string; model: string }>();
-  return selected ? { ...data, ...selected } : null;
-}
-const catalogTables = {
-  brands: { table: 'device_brands', max: 50, parent: '' },
-  series: { table: 'device_series', max: 80, parent: 'brand_id' },
-  models: { table: 'device_models', max: 80, parent: 'series_id' },
-} as const;
-const catalogKind = (kind: string) => catalogTables[kind as keyof typeof catalogTables];
-app.get('/api/device-catalog', async (c) => {
-  const tenant = c.get('session').tenant_id;
-  const [brands, series, models] = await c.env.DB.batch([
-    c.env.DB.prepare(
-      'SELECT id,name FROM device_brands WHERE tenant_id=? AND active=1 ORDER BY name',
-    ).bind(tenant),
-    c.env.DB.prepare(
-      'SELECT id,brand_id,name FROM device_series WHERE tenant_id=? AND active=1 ORDER BY name',
-    ).bind(tenant),
-    c.env.DB.prepare(
-      'SELECT id,series_id,name FROM device_models WHERE tenant_id=? AND active=1 ORDER BY name',
-    ).bind(tenant),
-  ]);
-  return c.json({ brands: brands.results, series: series.results, models: models.results });
-});
-app.post('/api/device-catalog/:kind', async (c) => {
-  const session = c.get('session');
-  if (session.role !== '店主') return c.json({ error: '只有店主可以管理助听器字典' }, 403);
-  const kind = c.req.param('kind'),
-    config = catalogKind(kind);
-  if (!config) return c.json({ error: '字典分类不存在' }, 404);
-  const body = await c.req.json();
-  const parsed = z.string().trim().min(1).max(config.max).safeParse(body.name);
-  if (!parsed.success) return c.json({ error: '请填写有效名称' }, 400);
-  const name = parsed.data,
-    tenant = session.tenant_id;
-  let parentId = '';
-  if (kind !== 'brands') {
-    parentId = kind === 'series' ? body.brandId : body.seriesId;
-    if (typeof parentId !== 'string' || !parentId) return c.json({ error: '请先选择上一级' }, 400);
-    const parent =
-      kind === 'series'
-        ? await c.env.DB.prepare(
-            'SELECT id FROM device_brands WHERE id=? AND tenant_id=? AND active=1',
-          )
-            .bind(parentId, tenant)
-            .first()
-        : await c.env.DB.prepare(
-            'SELECT s.id FROM device_series s JOIN device_brands b ON b.id=s.brand_id AND b.tenant_id=s.tenant_id WHERE s.id=? AND s.tenant_id=? AND s.active=1 AND b.active=1',
-          )
-            .bind(parentId, tenant)
-            .first();
-    if (!parent) return c.json({ error: '上一级不存在或已停用' }, 400);
-  }
-  const duplicateSql =
-    kind === 'brands'
-      ? `SELECT id FROM ${config.table} WHERE tenant_id=? AND name=? AND active=1`
-      : `SELECT id FROM ${config.table} WHERE tenant_id=? AND ${config.parent}=? AND name=? AND active=1`;
-  const duplicate = await c.env.DB.prepare(duplicateSql)
-    .bind(...(kind === 'brands' ? [tenant, name] : [tenant, parentId, name]))
-    .first();
-  if (duplicate) return c.json({ error: '同一级已存在该名称' }, 409);
-  const key = id();
-  const insertSql =
-    kind === 'brands'
-      ? `INSERT INTO ${config.table}(id,tenant_id,name) VALUES(?,?,?)`
-      : `INSERT INTO ${config.table}(id,tenant_id,${config.parent},name) VALUES(?,?,?,?)`;
-  await c.env.DB.batch([
-    c.env.DB.prepare(insertSql).bind(
-      ...(kind === 'brands' ? [key, tenant, name] : [key, tenant, parentId, name]),
-    ),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,NULL)',
-    ).bind(
-      id(),
-      tenant,
-      session.actor,
-      `新增助听器${kind === 'brands' ? '品牌' : kind === 'series' ? '系列' : '型号'}：${name}`,
-    ),
-  ]);
-  return c.json({ id: key }, 201);
-});
-app.put('/api/device-catalog/:kind/:id', async (c) => {
-  const session = c.get('session');
-  if (session.role !== '店主') return c.json({ error: '只有店主可以管理助听器字典' }, 403);
-  const kind = c.req.param('kind'),
-    config = catalogKind(kind);
-  if (!config) return c.json({ error: '字典分类不存在' }, 404);
-  const body = await c.req.json();
-  const parsed = z.string().trim().min(1).max(config.max).safeParse(body.name);
-  if (!parsed.success) return c.json({ error: '请填写有效名称' }, 400);
-  const tenant = session.tenant_id,
-    key = c.req.param('id');
-  const current = await c.env.DB.prepare(
-    `SELECT * FROM ${config.table} WHERE id=? AND tenant_id=? AND active=1`,
-  )
-    .bind(key, tenant)
-    .first<any>();
-  if (!current) return c.json({ error: '字典项不存在' }, 404);
-  const duplicateSql =
-    kind === 'brands'
-      ? `SELECT id FROM ${config.table} WHERE tenant_id=? AND name=? AND active=1 AND id<>?`
-      : `SELECT id FROM ${config.table} WHERE tenant_id=? AND ${config.parent}=? AND name=? AND active=1 AND id<>?`;
-  const duplicate = await c.env.DB.prepare(duplicateSql)
-    .bind(
-      ...(kind === 'brands'
-        ? [tenant, parsed.data, key]
-        : [tenant, current[config.parent], parsed.data, key]),
-    )
-    .first();
-  if (duplicate) return c.json({ error: '同一级已存在该名称' }, 409);
-  await c.env.DB.batch([
-    c.env.DB.prepare(`UPDATE ${config.table} SET name=? WHERE id=? AND tenant_id=?`).bind(
-      parsed.data,
-      key,
-      tenant,
-    ),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,NULL)',
-    ).bind(id(), tenant, session.actor, `修改助听器字典：${current.name} → ${parsed.data}`),
-  ]);
-  return c.json({ ok: true });
-});
-app.delete('/api/device-catalog/:kind/:id', async (c) => {
-  const session = c.get('session');
-  if (session.role !== '店主') return c.json({ error: '只有店主可以管理助听器字典' }, 403);
-  const kind = c.req.param('kind'),
-    config = catalogKind(kind);
-  if (!config) return c.json({ error: '字典分类不存在' }, 404);
-  const tenant = session.tenant_id,
-    key = c.req.param('id');
-  const current = await c.env.DB.prepare(
-    `SELECT name FROM ${config.table} WHERE id=? AND tenant_id=? AND active=1`,
-  )
-    .bind(key, tenant)
-    .first<{ name: string }>();
-  if (!current) return c.json({ error: '字典项不存在' }, 404);
-  const statements = [];
-  if (kind === 'brands') {
-    statements.push(
-      c.env.DB.prepare(
-        'UPDATE device_models SET active=0 WHERE tenant_id=? AND series_id IN (SELECT id FROM device_series WHERE tenant_id=? AND brand_id=?)',
-      ).bind(tenant, tenant, key),
-    );
-    statements.push(
-      c.env.DB.prepare('UPDATE device_series SET active=0 WHERE tenant_id=? AND brand_id=?').bind(
-        tenant,
-        key,
-      ),
-    );
-  } else if (kind === 'series') {
-    statements.push(
-      c.env.DB.prepare('UPDATE device_models SET active=0 WHERE tenant_id=? AND series_id=?').bind(
-        tenant,
-        key,
-      ),
-    );
-  }
-  statements.push(
-    c.env.DB.prepare(`UPDATE ${config.table} SET active=0 WHERE id=? AND tenant_id=?`).bind(
-      key,
-      tenant,
-    ),
-  );
-  statements.push(
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,NULL)',
-    ).bind(id(), tenant, session.actor, `停用助听器字典：${current.name}`),
-  );
-  await c.env.DB.batch(statements);
-  return c.json({ ok: true });
-});
 app.get('/api/customers', async (c) => {
   const rows = await c.env.DB.prepare(
     'SELECT * FROM customers WHERE tenant_id=? AND deleted_at IS NULL ORDER BY created_at DESC,name',
@@ -355,13 +174,12 @@ app.post('/api/intakes', async (c) => {
       followup: followupSchema.optional(),
     })
     .safeParse(await c.req.json());
-  if (!parsed.success) return c.json({ error: '建档内容不完整，请检查必填项目' }, 400);
+  if (!parsed.success) return c.json({ error: parsed.error.issues.some((issue) => issue.path[0] === 'fitting') ? '请填写助听器型号及对应耳侧序列号；左右序列号不能相同' : '建档内容不完整，请检查必填项目' }, 400);
   const s = c.get('session'),
     d = parsed.data;
   if ((d.exam || d.fitting) && !canWrite(s.role, 'exam'))
     return c.json({ error: '当前角色无权录入听力检查和验配' }, 403);
-  const fitting = d.fitting ? await normalizeFitting(c.env.DB, s.tenant_id, d.fitting) : null;
-  if (d.fitting && !fitting) return c.json({ error: '所选型号不存在或已停用' }, 400);
+  const fitting = d.fitting;
   const customerId = id(),
     p = d.customer;
   const statements = [
@@ -540,15 +358,10 @@ for (const [path, schema, resource, label] of [
     const s = c.get('session');
     if (!canWrite(s.role, resource)) return c.json({ error: '当前角色无权填写专业验配记录' }, 403);
     const p = schema.safeParse(await c.req.json());
-    if (!p.success) return c.json({ error: '记录格式不正确，请检查必填项目及听阈范围' }, 400);
+    if (!p.success) return c.json({ error: path === 'fittings' ? '请填写型号及对应耳侧序列号，左右序列号不能相同' : '记录格式不正确，请检查必填项目及听阈范围' }, 400);
     const d: any = p.data,
       k = id(),
       customer = c.req.param('id');
-    if (path === 'fittings' && d.deviceModelId) {
-      const normalized = await normalizeFitting(c.env.DB, s.tenant_id, d);
-      if (!normalized) return c.json({ error: '所选型号不存在或已停用' }, 400);
-      Object.assign(d, normalized);
-    }
     const statement =
       path === 'followups'
         ? c.env.DB.prepare(
@@ -576,30 +389,14 @@ for (const [kind, schema, resource, label] of [
       record = c.req.param('recordId');
     if (!canWrite(s.role, resource)) return c.json({ error: '当前角色无权修改专业记录' }, 403);
     const parsed = schema.safeParse(await c.req.json());
-    if (!parsed.success) return c.json({ error: '记录格式不正确，请检查必填项目及听阈范围' }, 400);
+    if (!parsed.success) return c.json({ error: kind === 'fittings' ? '请填写型号及对应耳侧序列号，左右序列号不能相同' : '记录格式不正确，请检查必填项目及听阈范围' }, 400);
     const existing = await c.env.DB.prepare(
       `SELECT data FROM ${kind} WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL`,
     )
       .bind(record, customer, s.tenant_id)
       .first<{ data: string }>();
     if (!existing) return c.json({ error: '记录不存在或已删除' }, 404);
-    let data: any = parsed.data;
-    if (kind === 'fittings') {
-      const previous = JSON.parse(existing.data);
-      if (data.deviceModelId && data.deviceModelId !== previous.deviceModelId) {
-        const normalized = await normalizeFitting(c.env.DB, s.tenant_id, data);
-        if (!normalized) return c.json({ error: '所选型号不存在或已停用' }, 400);
-        data = normalized;
-      } else {
-        data = {
-          ...data,
-          brand: previous.brand,
-          series: previous.series,
-          model: previous.model,
-          deviceModelId: previous.deviceModelId,
-        };
-      }
-    }
+    const data: any = parsed.data;
     await c.env.DB.batch([
       c.env.DB.prepare(
         `UPDATE ${kind} SET date=?,data=? WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL`,

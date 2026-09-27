@@ -40,16 +40,23 @@ export const examSchema = z.object({
 });
 export const fittingSchema = z.object({
   date: dateSchema,
-  deviceModelId: z.string().max(100).optional(),
-  brand: z.string().min(1).max(50),
+  brand: z.string().trim().max(50).default(''),
   series: z.string().max(80).optional(),
-  model: z.string().min(1).max(80),
+  model: z.string().trim().min(1).max(80),
   side: z.enum(['双耳', '左耳', '右耳']),
-  serial: z.string().max(100),
+  serialLeft: z.string().trim().max(100).default(''),
+  serialRight: z.string().trim().max(100).default(''),
   amount: z.number().min(0).max(10000000),
   warranty: z.union([dateSchema, z.literal('')]),
   notes: z.string().trim().min(1).max(4000),
-});
+}).refine((d) => d.side === '右耳' || !!d.serialLeft, { message: '请填写左耳序列号' })
+  .refine((d) => d.side === '左耳' || !!d.serialRight, { message: '请填写右耳序列号' })
+  .refine((d) => d.side !== '双耳' || d.serialLeft.toLowerCase() !== d.serialRight.toLowerCase(), { message: '左右耳序列号不能相同' })
+  .transform((d) => {
+    const serialLeft = d.side === '右耳' ? '' : d.serialLeft;
+    const serialRight = d.side === '左耳' ? '' : d.serialRight;
+    return { ...d, serialLeft, serialRight, serial: [serialLeft && `左耳：${serialLeft}`, serialRight && `右耳：${serialRight}`].filter(Boolean).join('；') };
+  });
 export const followupSchema = z.object({
   due: dateSchema,
   type: z.enum(['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约']),

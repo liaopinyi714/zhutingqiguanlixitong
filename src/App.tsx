@@ -10,8 +10,7 @@ import {
   CheckCircle2,
   ChevronRight,
   ClipboardList,
-  PanelLeftClose,
-  PanelLeftOpen,
+  PanelLeft,
   Ear,
   FileText,
   Headphones,
@@ -77,11 +76,6 @@ type Detail = {
   followups: Follow[];
   attachments: any[];
   audit: any[];
-};
-type DeviceCatalog = {
-  brands: { id: string; name: string }[];
-  series: { id: string; brand_id: string; name: string }[];
-  models: { id: string; series_id: string; name: string }[];
 };
 const statuses = ['全部客户', '待评估', '试戴中', '已验配', '长期随访'];
 const today = () => new Date().toLocaleDateString('sv-SE');
@@ -377,234 +371,28 @@ function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
   );
 }
 
-function DeviceCatalogManager({
-  catalog,
-  role,
-  reload,
-}: {
-  catalog: DeviceCatalog;
-  role: string;
-  reload: () => Promise<void>;
-}) {
-  const [brandChoice, setBrandChoice] = useState('');
-  const [seriesChoice, setSeriesChoice] = useState('');
-  const [names, setNames] = useState({ brands: '', series: '', models: '' });
-  const [editing, setEditing] = useState<{ kind: string; id: string; name: string } | null>(null);
-  const [message, setMessage] = useState('');
-  const [working, setWorking] = useState(false);
-  const brandId = catalog.brands.some((b) => b.id === brandChoice)
-    ? brandChoice
-    : catalog.brands[0]?.id || '';
-  const visibleSeries = catalog.series.filter((s) => s.brand_id === brandId);
-  const seriesId = visibleSeries.some((s) => s.id === seriesChoice)
-    ? seriesChoice
-    : visibleSeries[0]?.id || '';
-  const visibleModels = catalog.models.filter((m) => m.series_id === seriesId);
-  const levels = [
-    { kind: 'brands', title: '品牌', rows: catalog.brands, parentId: '' },
-    { kind: 'series', title: '系列', rows: visibleSeries, parentId: brandId },
-    { kind: 'models', title: '型号', rows: visibleModels, parentId: seriesId },
-  ] as const;
-  async function create(kind: 'brands' | 'series' | 'models', parentId: string) {
-    const name = names[kind].trim();
-    if (!name || (kind !== 'brands' && !parentId)) return;
-    setWorking(true);
-    setMessage('');
-    try {
-      const created = await api(`/device-catalog/${kind}`, 'POST', {
-        name,
-        ...(kind === 'series'
-          ? { brandId: parentId }
-          : kind === 'models'
-            ? { seriesId: parentId }
-            : {}),
-      });
-      setNames((current) => ({ ...current, [kind]: '' }));
-      if (kind === 'brands') setBrandChoice(created.id);
-      if (kind === 'series') setSeriesChoice(created.id);
-      await reload();
-      setMessage(`${{ brands: '品牌', series: '系列', models: '型号' }[kind]}已添加`);
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setWorking(false);
-    }
-  }
-  async function update(kind: string, id: string, name?: string) {
-    if (working) return;
-    const archive = name === undefined;
-    if (
-      archive &&
-      !window.confirm('停用后将不再出现在新验配记录中，已有记录仍保留原名称。确定停用吗？')
-    )
-      return;
-    setWorking(true);
-    setMessage('');
-    try {
-      await api(
-        `/device-catalog/${kind}/${id}`,
-        archive ? 'DELETE' : 'PUT',
-        archive ? undefined : { name: name?.trim() },
-      );
-      setEditing(null);
-      await reload();
-      setMessage(archive ? '字典项已停用' : '名称已更新');
-    } catch (e) {
-      setMessage((e as Error).message);
-    } finally {
-      setWorking(false);
-    }
-  }
-  return (
-    <section className="panel padded catalog-panel">
-      <div className="section-title">
-        <div>
-          <h2>助听器型号字典</h2>
-          <p className="muted">先建品牌，再建系列和型号；新验配记录可直接选择。</p>
-        </div>
-        <Headphones size={20} />
-      </div>
-      {message && (
-        <p className="catalog-message" role="status">
-          {message}
-        </p>
-      )}
-      <div className="catalog-grid">
-        {levels.map(({ kind, title, rows, parentId }) => (
-          <div className="catalog-level" key={kind}>
-            <h3>
-              {title}
-              <small>{rows.length}</small>
-            </h3>
-            <div className="catalog-items">
-              {rows.length ? (
-                rows.map((row) => (
-                  <div
-                    className={
-                      'catalog-item ' +
-                      ((kind === 'brands' ? brandId : kind === 'series' ? seriesId : '') === row.id
-                        ? 'selected'
-                        : '')
-                    }
-                    key={row.id}
-                  >
-                    {editing?.kind === kind && editing.id === row.id ? (
-                      <form
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          void update(kind, row.id, editing.name);
-                        }}
-                      >
-                        <input
-                          aria-label={`修改${title}名称`}
-                          value={editing.name}
-                          maxLength={kind === 'brands' ? 50 : 80}
-                          onChange={(e) => setEditing({ ...editing, name: e.target.value })}
-                          required
-                        />
-                        <button className="button small" disabled={working}>
-                          保存
-                        </button>
-                        <button
-                          type="button"
-                          className="button small"
-                          onClick={() => setEditing(null)}
-                        >
-                          取消
-                        </button>
-                      </form>
-                    ) : (
-                      <>
-                        {kind === 'models' ? (
-                          <span className="catalog-select" title={row.name}>
-                            {row.name}
-                          </span>
-                        ) : (
-                          <button
-                            type="button"
-                            className="catalog-select"
-                            title={row.name}
-                            onClick={() =>
-                              kind === 'brands'
-                                ? (setBrandChoice(row.id), setSeriesChoice(''))
-                                : setSeriesChoice(row.id)
-                            }
-                          >
-                            {row.name}
-                          </button>
-                        )}
-                        {role === '店主' && (
-                          <div className="catalog-actions">
-                            <button
-                              type="button"
-                              disabled={working}
-                              onClick={() => setEditing({ kind, id: row.id, name: row.name })}
-                            >
-                              编辑
-                            </button>
-                            <button
-                              type="button"
-                              disabled={working}
-                              onClick={() => void update(kind, row.id)}
-                            >
-                              停用
-                            </button>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                ))
-              ) : (
-                <p className="muted catalog-empty">暂无{title}</p>
-              )}
-            </div>
-            {role === '店主' && (
-              <form
-                className="catalog-add"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  void create(kind, parentId);
-                }}
-              >
-                <input
-                  aria-label={`新建${title}`}
-                  placeholder={`输入${title}名称`}
-                  value={names[kind]}
-                  maxLength={kind === 'brands' ? 50 : 80}
-                  onChange={(e) => setNames((current) => ({ ...current, [kind]: e.target.value }))}
-                  disabled={working || (kind !== 'brands' && !parentId)}
-                  required
-                />
-                <button
-                  className="button small"
-                  disabled={working || (kind !== 'brands' && !parentId)}
-                  type="submit"
-                >
-                  <Plus size={15} /> 添加
-                </button>
-              </form>
-            )}
-          </div>
-        ))}
-      </div>
-      <p className="muted catalog-footnote">
-        停用字典项只影响今后的选择；已保存的验配记录保持原样。
-      </p>
-    </section>
-  );
+function deviceSerial(value: any) {
+  return [value?.serialLeft && '左耳：' + value.serialLeft, value?.serialRight && '右耳：' + value.serialRight].filter(Boolean).join('；') || value?.serial || '未填写';
+}
+function FittingDeviceFields({ value, onChange }: { value: any; onChange: (key: string, value: string) => void }) {
+  return <>
+    <Field label="品牌"><input maxLength={50} value={value.brand || ''} onChange={(e) => onChange('brand', e.target.value)} placeholder="直接填写品牌（选填）" /></Field>
+    <Field label="系列"><input maxLength={80} value={value.series || ''} onChange={(e) => onChange('series', e.target.value)} placeholder="选填" /></Field>
+    <Field label="助听器型号 *" wide><input required maxLength={80} value={value.model || ''} onChange={(e) => onChange('model', e.target.value)} placeholder="直接填写型号；左右耳型号不同时请分别建立验配记录" /></Field>
+    {value.side !== '右耳' && <Field label="左耳助听器序列号（SN） *"><input required maxLength={100} value={value.serialLeft || ''} onChange={(e) => onChange('serialLeft', e.target.value)} placeholder="填写机身或包装上的唯一序列号" /></Field>}
+    {value.side !== '左耳' && <Field label="右耳助听器序列号（SN） *"><input required maxLength={100} value={value.serialRight || ''} onChange={(e) => onChange('serialRight', e.target.value)} placeholder="填写机身或包装上的唯一序列号" /></Field>}
+    {value.id && value.serial && !value.serialLeft && !value.serialRight && <p className="muted wide">原序列号：{value.serial}。请核对后分别填写左右耳序列号。</p>}
+  </>;
 }
 
 const blankCurve = () =>
   frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
 
 function IntakePage({
-  catalog,
   role,
   onSave,
   onCancel,
 }: {
-  catalog: DeviceCatalog;
   role: string;
   onSave: (payload: { customer: any; exam?: Exam; fitting?: any; followup?: any }) => Promise<void>;
   onCancel: () => void;
@@ -634,13 +422,10 @@ function IntakePage({
     conclusion: '',
   });
   const [fittingEnabled, setFittingEnabled] = useState(false);
-  const [brandId, setBrandId] = useState('');
-  const [seriesId, setSeriesId] = useState('');
-  const [modelId, setModelId] = useState('');
   const [fitting, setFitting] = useState({
     date: today(),
     side: '双耳',
-    serial: '',
+    brand: '', series: '', model: '', serialLeft: '', serialRight: '',
     amount: 0,
     warranty: '',
     notes: '',
@@ -649,8 +434,6 @@ function IntakePage({
   const [followup, setFollowup] = useState({ due: today(), type: '适应回访', note: '' });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
-  const series = catalog.series.filter((item) => item.brand_id === brandId);
-  const models = catalog.models.filter((item) => item.series_id === seriesId);
   const setPoint = (
     key: 'right' | 'left' | 'boneRight' | 'boneLeft',
     index: number,
@@ -665,11 +448,6 @@ function IntakePage({
     setSaving(true);
     setFormError('');
     try {
-      const brand = catalog.brands.find((item) => item.id === brandId);
-      const selectedSeries = catalog.series.find((item) => item.id === seriesId);
-      const model = catalog.models.find((item) => item.id === modelId);
-      if (fittingEnabled && (!brand || !selectedSeries || !model))
-        throw new Error('请完整选择助听器品牌、系列和型号');
       await onSave({
         customer: profile,
         ...(examEnabled ? { exam } : {}),
@@ -678,10 +456,6 @@ function IntakePage({
               fitting: {
                 ...fitting,
                 amount: Number(fitting.amount),
-                deviceModelId: modelId,
-                brand: brand!.name,
-                series: selectedSeries!.name,
-                model: model!.name,
               },
             }
           : {}),
@@ -985,58 +759,7 @@ function IntakePage({
                     ))}
                   </select>
                 </Field>
-                <Field label="品牌 *">
-                  <select
-                    required
-                    value={brandId}
-                    onChange={(e) => {
-                      setBrandId(e.target.value);
-                      setSeriesId('');
-                      setModelId('');
-                    }}
-                  >
-                    <option value="">选择品牌</option>
-                    {catalog.brands.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="系列 *">
-                  <select
-                    required
-                    value={seriesId}
-                    onChange={(e) => {
-                      setSeriesId(e.target.value);
-                      setModelId('');
-                    }}
-                  >
-                    <option value="">选择系列</option>
-                    {series.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="型号 *">
-                  <select required value={modelId} onChange={(e) => setModelId(e.target.value)}>
-                    <option value="">选择型号</option>
-                    {models.map((v) => (
-                      <option key={v.id} value={v.id}>
-                        {v.name}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="设备序列号">
-                  <input
-                    maxLength={100}
-                    value={fitting.serial}
-                    onChange={(e) => setFitting({ ...fitting, serial: e.target.value })}
-                  />
-                </Field>
+                <FittingDeviceFields value={fitting} onChange={(key, value) => setFitting((current) => ({ ...current, [key]: value }))} />
                 <Field label="成交金额（元）">
                   <input
                     type="number"
@@ -1063,7 +786,7 @@ function IntakePage({
                 </Field>
               </div>
             ) : (
-              <p className="muted">勾选后从门店型号字典选择设备，并填写保修、调试和交付信息。</p>
+              <p className="muted">直接填写型号和每台助听器的序列号，并记录保修、调试和交付信息。</p>
             )}
           </section>
         )}
@@ -1136,7 +859,6 @@ export default function App() {
     [removedCustomers, setRemovedCustomers] = useState<Customer[]>([]),
     [showRemovedCustomers, setShowRemovedCustomers] = useState(false),
     [warranties, setWarranties] = useState<any[]>([]),
-    [catalog, setCatalog] = useState<DeviceCatalog>({ brands: [], series: [], models: [] }),
     [followups, setFollowups] = useState<Follow[]>([]),
     [selected, setSelected] = useState<string | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
@@ -1220,21 +942,16 @@ export default function App() {
     setTimeout(() => setToast(''), 3500);
   };
   async function refresh(includeRemoved = role === '店主') {
-    const [a, b, devices, warrantyRows, removedRows] = await Promise.all([
+    const [a, b, warrantyRows, removedRows] = await Promise.all([
       api('/customers'),
       api('/followups'),
-      api('/device-catalog'),
       api('/warranties'),
       includeRemoved ? api('/customers/removed') : Promise.resolve([]),
     ]);
     setCustomers(a);
     setFollowups(b);
-    setCatalog(devices);
     setWarranties(warrantyRows);
     setRemovedCustomers(removedRows);
-  }
-  async function refreshCatalog() {
-    setCatalog(await api('/device-catalog'));
   }
   async function loadDetail(key: string) {
     setDetail(null);
@@ -1422,37 +1139,13 @@ export default function App() {
             },
       );
     }
-    if (kind === 'fitting') {
-      const brand = catalog.brands.find((item) => item.name === record?.brand);
-      const series = catalog.series.find(
-        (item) => item.brand_id === brand?.id && item.name === record?.series,
-      );
-      setDraft(
-        record
-          ? {
-              ...record,
-              deviceSelectionChanged: false,
-              deviceBrandId: brand?.id || '',
-              deviceSeriesId: series?.id || '',
-              deviceModelId: record.deviceModelId || '',
-            }
-          : {
-              date: today(),
-              deviceSelectionChanged: true,
-              deviceBrandId: '',
-              deviceSeriesId: '',
-              deviceModelId: '',
-              brand: '',
-              series: '',
-              model: '',
-              side: '双耳',
-              serial: '',
-              amount: 0,
-              warranty: '',
-              notes: '',
-            },
-      );
-    }
+    if (kind === 'fitting') setDraft({
+      date: today(), brand: '', series: '', model: '', side: '双耳',
+      amount: 0, warranty: '', notes: '',
+      ...record,
+      serialLeft: record?.serialLeft || (record?.side === '左耳' ? record.serial : '') || '',
+      serialRight: record?.serialRight || (record?.side === '右耳' ? record.serial : '') || '',
+    });
     if (kind === 'repair')
       setDraft(
         record?.id
@@ -1996,10 +1689,10 @@ export default function App() {
     <div className={'app-shell cf-shell' + (sidebarCollapsed ? ' sidebar-collapsed' : '') + (sidebarHover && sidebarCollapsed ? ' sidebar-peek' : '')}>
       <aside
         className="sidebar"
-        onMouseEnter={() => { if (sidebarCollapsed && window.matchMedia('(hover: hover)').matches) setSidebarHover(true); }}
-        onMouseMove={() => { if (sidebarCollapsed && !sidebarHover && window.matchMedia('(hover: hover)').matches) setSidebarHover(true); }}
+        onMouseEnter={(event) => { if (sidebarCollapsed && window.matchMedia('(hover: hover)').matches) setSidebarHover(!(event.target as Element).closest('.sidebar-bottom')); }}
+        onMouseMove={(event) => { if (sidebarCollapsed && window.matchMedia('(hover: hover)').matches) setSidebarHover(!(event.target as Element).closest('.sidebar-bottom')); }}
         onMouseLeave={() => setSidebarHover(false)}
-        onFocusCapture={() => { if (sidebarCollapsed) setSidebarHover(true); }}
+        onFocusCapture={(event) => { if (sidebarCollapsed) setSidebarHover(!event.target.closest('.sidebar-bottom')); }}
         onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) setSidebarHover(false); }}
       >
         <div className="brand">
@@ -2076,14 +1769,12 @@ export default function App() {
             className="sidebar-toggle"
             type="button"
             aria-label={sidebarCollapsed ? '固定展开侧栏' : '收起侧栏'}
-            title={sidebarCollapsed ? '固定展开侧栏' : '收起侧栏'}
             onClick={() => {
               setSidebarCollapsed((value) => !value);
               setSidebarHover(false);
             }}
           >
-            {sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-            <span>{sidebarCollapsed ? '固定展开' : '收起侧栏'}</span>
+            <PanelLeft size={18} strokeWidth={1.4} />
           </button>
         </div>
       </aside>
@@ -2133,7 +1824,6 @@ export default function App() {
           )}
           {page === 'intake' && (
             <IntakePage
-              catalog={catalog}
               role={role}
               onSave={saveIntake}
               onCancel={() => navigate('customers')}
@@ -2780,7 +2470,7 @@ export default function App() {
                             <dl className="info-grid">
                               <div>
                                 <dt>设备序列号</dt>
-                                <dd>{f.serial || '未填写'}</dd>
+                                <dd>{deviceSerial(f)}</dd>
                               </div>
                               <div>
                                 <dt>成交金额</dt>
@@ -2845,7 +2535,7 @@ export default function App() {
                               <div>
                                 <span className="eyebrow">故障日期 {r.occurred_date} · {r.status}</span>
                                 <h3>{[fitting?.brand, fitting?.series, fitting?.model].filter(Boolean).join(' · ')}</h3>
-                                <p className="muted">{fitting?.side} · 序列号 {fitting?.serial || '未填写'}</p>
+                                <p className="muted">{fitting?.side} · 序列号 {deviceSerial(fitting)}</p>
                               </div>
                               {role !== '前台' && <div className="record-actions">
                                 <button className="button small" onClick={() => openForm('repair', r)}><Pencil size={14} /> 编辑</button>
@@ -3219,10 +2909,9 @@ export default function App() {
                 <div>
                   <span className="eyebrow">工作空间</span>
                   <h1>门店设置</h1>
-                  <p>助听器型号字典、角色权限与数据导出。</p>
+                  <p>角色权限与数据导出。</p>
                 </div>
               </div>
-              <DeviceCatalogManager catalog={catalog} role={role} reload={refreshCatalog} />
               <div className="detail-grid">
                 <section className="panel padded">
                   <h2>{identity.storeName}</h2>
@@ -3254,7 +2943,6 @@ export default function App() {
                       {[
                         ['客户与随访', '✓', '✓', '✓'],
                         ['检查、验配与维修', '✓', '✓', '—'],
-                        ['型号字典维护', '✓', '—', '—'],
                         ['报告上传与查看', '✓', '✓', '✓'],
                         ['全量档案导出', '✓', '—', '—'],
                       ].map((row) => (
@@ -3273,7 +2961,7 @@ export default function App() {
                     <ArrowDownToLine size={20} />
                   </div>
                   <p className="muted paragraph">
-                    导出客户、听力检查、验配、维修、随访、助听器型号字典与操作记录的 JSON
+                    导出客户、听力检查、验配、维修、随访与操作记录的 JSON
                     数据。包含附件目录；原始报告请在客户档案中单独下载。
                   </p>
                   <button className="button full" disabled={role !== '店主'} onClick={exportData}>
@@ -3639,12 +3327,6 @@ export default function App() {
               )}
               {modal === 'fitting' && (
                 <div className="form-grid">
-                  {!catalog.models.length && (
-                    <div className="notice wide">
-                      <Headphones size={20} />
-                      <p>门店尚未建立助听器型号。请先在“门店设置”中添加品牌、系列和型号。</p>
-                    </div>
-                  )}
                   <Field label="验配 / 调试日期 *">
                     <input
                       type="date"
@@ -3661,100 +3343,7 @@ export default function App() {
                       ))}
                     </select>
                   </Field>
-                  <Field label="品牌 *">
-                    <select
-                      required={!draft.id || draft.deviceSelectionChanged}
-                      value={draft.deviceBrandId || ''}
-                      onChange={(e) =>
-                        setDraft((d: any) => ({
-                          ...d,
-                          deviceSelectionChanged: true,
-                          deviceBrandId: e.target.value,
-                          deviceSeriesId: '',
-                          deviceModelId: '',
-                          brand: '',
-                          series: '',
-                          model: '',
-                        }))
-                      }
-                    >
-                      <option value="">
-                        {draft.id ? `保留原品牌：${draft.brand}` : '选择品牌'}
-                      </option>
-                      {catalog.brands.map((b) => (
-                        <option key={b.id} value={b.id}>
-                          {b.name}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="系列 *">
-                    <select
-                      required={!draft.id || draft.deviceSelectionChanged}
-                      value={draft.deviceSeriesId || ''}
-                      onChange={(e) =>
-                        setDraft((d: any) => ({
-                          ...d,
-                          deviceSelectionChanged: true,
-                          deviceSeriesId: e.target.value,
-                          deviceModelId: '',
-                          series: '',
-                          model: '',
-                        }))
-                      }
-                    >
-                      <option value="">
-                        {draft.id ? `保留原系列：${draft.series || '无'}` : '选择系列'}
-                      </option>
-                      {catalog.series
-                        .filter((s) => s.brand_id === draft.deviceBrandId)
-                        .map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                    </select>
-                  </Field>
-                  <Field label="型号 *">
-                    <select
-                      required={!draft.id || draft.deviceSelectionChanged}
-                      value={draft.deviceModelId || ''}
-                      onChange={(e) => {
-                        const selectedModel = catalog.models.find((m) => m.id === e.target.value);
-                        const selectedSeries = catalog.series.find(
-                          (s) => s.id === draft.deviceSeriesId,
-                        );
-                        const selectedBrand = catalog.brands.find(
-                          (b) => b.id === draft.deviceBrandId,
-                        );
-                        setDraft((d: any) => ({
-                          ...d,
-                          deviceSelectionChanged: true,
-                          deviceModelId: e.target.value,
-                          brand: selectedBrand?.name || '',
-                          series: selectedSeries?.name || '',
-                          model: selectedModel?.name || '',
-                        }));
-                      }}
-                    >
-                      <option value="">
-                        {draft.id ? `保留原型号：${draft.model}` : '选择型号'}
-                      </option>
-                      {catalog.models
-                        .filter((m) => m.series_id === draft.deviceSeriesId)
-                        .map((m) => (
-                          <option key={m.id} value={m.id}>
-                            {m.name}
-                          </option>
-                        ))}
-                    </select>
-                  </Field>
-                  <Field label="设备序列号（注明左右耳）" wide>
-                    <input
-                      value={draft.serial}
-                      onChange={(e) => change('serial', e.target.value)}
-                    />
-                  </Field>
+                  <FittingDeviceFields value={draft} onChange={change} />
                   <Field label="成交金额（元）">
                     <input
                       type="number"
@@ -3787,7 +3376,7 @@ export default function App() {
                   <Field label="关联验配设备 *" wide>
                     <select required value={draft.fittingId} onChange={(e) => change('fittingId', e.target.value)}>
                       {detail?.fittings.map((f) => <option key={f.id} value={f.id}>
-                        {[f.brand, f.series, f.model, f.side, f.serial].filter(Boolean).join(' · ')}
+                        {[f.brand, f.series, f.model, f.side, deviceSerial(f)].filter(Boolean).join(' · ')}
                       </option>)}
                     </select>
                   </Field>

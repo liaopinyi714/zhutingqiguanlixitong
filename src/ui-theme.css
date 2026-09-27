@@ -1,4 +1,20 @@
 /* Shared visual system for the dashboard, customer records, and login. */
+@media (min-width: 651px) {
+  .cf-shell .sidebar nav svg, .cf-shell .sidebar-search svg { stroke-width: 1.4; color: #858585; }
+  .cf-shell .sidebar-toggle { justify-content: flex-start; padding: 14px 8px; margin-top: 10px; }
+  .cf-shell.sidebar-collapsed .main { margin-left: 56px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar { width: 56px; padding: 16px 7px 0; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar .brand { margin-bottom: 0; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .brand-icon { width: 28px; height: 28px; border-radius: 6px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .brand-icon svg { width: 21px; height: 21px; stroke-width: 1.5; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-search { border: 0; background: transparent; box-shadow: none; margin: 18px 0 8px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav { gap: 7px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav button { padding: 12px 0; border-radius: 6px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav svg { width: 18px; height: 18px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile { display: none; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-bottom { min-height: 62px; }
+  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-toggle { padding: 16px 0; margin-top: 10px; }
+}
 :root {
   font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 15px;
