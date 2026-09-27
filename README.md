@@ -2,7 +2,7 @@
 
 面向助听器门店的客户与服务档案工作台。正式版使用 Cloudflare Workers、D1、私有 R2 与 Access 员工身份验证；业务功能保持与已验收 Demo 一致。正式数据库从空库开始，本地演示资料另行隔离。
 
-**首次部署请按 [Cloudflare 正式部署指南](docs/DEPLOYMENT.md) 操作。** 包含免费额度、控制台配置、员工权限、GitHub 发布和常见问题；另有 [备份恢复指南](docs/BACKUP.md)。R2 超免费额度会按量计费，中国大陆连接需要实测。
+**首次部署推荐按 [Cloudflare 网页操作指南](docs/DEPLOYMENT-GUI.md) 操作。** 你只需使用 Cloudflare 和 GitHub 网站；Cloudflare 在云端自动构建、建表和发布，不需要在自己的电脑运行命令。另有 [命令行部署指南](docs/DEPLOYMENT.md) 和 [备份恢复指南](docs/BACKUP.md)。R2 超免费额度会按量计费，中国大陆连接需要实测。
 
 ## 已实现
 

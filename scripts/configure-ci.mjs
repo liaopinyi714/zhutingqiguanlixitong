@@ -1,5 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { readConfig, configErrors } from './production-config.mjs';
+if (process.env.WORKERS_CI === '1' && process.env.WORKERS_CI_BRANCH !== 'main')
+  throw new Error('正式数据库迁移仅允许在 Cloudflare Builds 的 main 分支运行');
 const config = readConfig();
 config.account_id = process.env.CLOUDFLARE_ACCOUNT_ID;
 config.name = process.env.WORKER_NAME || 'hearing-care';

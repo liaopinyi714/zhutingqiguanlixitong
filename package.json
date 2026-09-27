@@ -17,6 +17,7 @@
     "staff:upload": "node scripts/upload-staff.mjs",
     "backup": "node scripts/backup.mjs",
     "build": "tsc --noEmit && vite build",
+    "build:cloudflare": "node scripts/configure-ci.mjs && pnpm test && pnpm build && wrangler d1 migrations apply DB --config wrangler.jsonc --remote",
     "test": "vitest run",
     "deploy": "pnpm check:production && pnpm build && wrangler deploy --config wrangler.jsonc"
   },
