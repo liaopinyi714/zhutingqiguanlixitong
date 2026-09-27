@@ -1,0 +1,445 @@
+/* Shared visual system for the dashboard, customer records, and login. */
+:root {
+  font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-size: 15px;
+  color: #262626;
+  background: #fafafa;
+  --ui-text: #262626;
+  --ui-muted: #686868;
+  --ui-border: #e2e2e2;
+  --ui-blue: #0866e8;
+}
+.cf-shell {
+  --dark: var(--ui-text);
+  --line: var(--ui-border);
+  --muted: var(--ui-muted);
+}
+h1,
+h2,
+h3 {
+  letter-spacing: 0;
+}
+.cf-shell h1 {
+  font-size: 28px;
+  font-weight: 600;
+}
+.cf-shell h2,
+.cf-shell .panel-heading h2,
+.cf-shell .section-title h2 {
+  font-size: 18px;
+  font-weight: 600;
+}
+.cf-shell h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
+.cf-shell .content {
+  max-width: 1440px;
+}
+.cf-shell .panel,
+.cf-shell .stat,
+.cf-shell .record-card {
+  border-color: var(--ui-border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 1px 2px #00000006;
+}
+.cf-shell .panel-heading {
+  background: #fafafa;
+  border-bottom: 1px solid var(--ui-border);
+  border-radius: 10px 10px 0 0;
+}
+.cf-shell .muted,
+.cf-shell .page-heading p,
+.cf-shell .panel-heading p,
+.cf-shell .section-title p,
+.cf-shell .person small,
+.cf-shell .subtext,
+.cf-shell .task-body p,
+.cf-shell .task-body small,
+.cf-shell .timeline p,
+.cf-shell .record-note,
+.cf-shell .note-block p,
+.cf-shell .result-grid p,
+.cf-shell .table-footer,
+.cf-shell .stat p {
+  color: var(--ui-muted);
+}
+.cf-shell .page-heading p,
+.cf-shell .panel-heading p,
+.cf-shell .section-title p,
+.cf-shell .task-body p,
+.cf-shell .record-note,
+.cf-shell .note-block p,
+.cf-shell .result-grid p {
+  font-size: 14px;
+  line-height: 1.75;
+}
+.cf-shell .customer-table td {
+  font-size: 15px;
+  padding-top: 17px;
+  padding-bottom: 17px;
+}
+.cf-shell .customer-table th {
+  font-size: 14px;
+  font-weight: 400;
+}
+.cf-shell .person strong,
+.cf-shell .task-body .text-link,
+.cf-shell .warranty-list strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.cf-shell .person small,
+.cf-shell .subtext,
+.cf-shell .task-body small,
+.cf-shell .badge,
+.cf-shell .table-footer,
+.cf-shell .stat p,
+.cf-shell .warranty-list small,
+.cf-shell .retention-note,
+.cf-shell .catalog-footnote,
+.cf-shell .removed-records > div,
+.cf-shell .attachment small {
+  font-size: 13px;
+}
+.cf-shell .info-grid dt,
+.cf-shell .stacked-info dt,
+.cf-shell .note-block h3,
+.cf-shell .note-block .inline-profile-field dt {
+  color: var(--ui-muted);
+  font-size: 14px;
+  font-weight: 400;
+}
+.cf-shell .info-grid dd,
+.cf-shell .stacked-info dd,
+.cf-shell .note-block .inline-profile-field dd {
+  color: var(--ui-text);
+  font-size: 15px;
+  line-height: 1.65;
+}
+.cf-shell .stat-top {
+  font-size: 14px;
+}
+.cf-shell .stat-value {
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.cf-shell .stat-value span {
+  font-size: 13px;
+}
+.cf-shell .breadcrumb {
+  font-size: 14px;
+}
+.cf-shell .eyebrow {
+  font-size: 13px;
+  letter-spacing: 0;
+}
+.cf-shell .button,
+.cf-shell .text-link,
+.cf-shell .back {
+  font-size: 14px;
+}
+.cf-shell .button {
+  min-height: 38px;
+  border-radius: 7px;
+}
+.cf-shell .button.small {
+  min-height: 32px;
+  font-size: 13px;
+}
+.cf-shell .button.primary,
+.cf-login .button.primary {
+  background: var(--ui-blue);
+  border-color: var(--ui-blue);
+  color: #fff;
+  box-shadow: 0 1px 2px #0866e81a;
+}
+.cf-shell .button.primary:hover,
+.cf-login .button.primary:hover {
+  background: #0757c5;
+  border-color: #0757c5;
+}
+input,
+select,
+textarea {
+  color: var(--ui-text);
+  border-color: #d5d5d5;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #858585;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--ui-blue);
+  box-shadow: 0 0 0 3px #0866e814;
+}
+button:focus-visible,
+a:focus-visible,
+tr:focus-visible {
+  outline-color: var(--ui-blue);
+}
+.cf-shell .field > span {
+  font-size: 14px;
+  color: #505050;
+}
+.cf-shell .field input,
+.cf-shell .field select,
+.cf-shell .field textarea,
+.cf-shell .search input,
+.cf-shell .catalog-add input,
+.cf-shell .catalog-item input {
+  font-size: 15px;
+}
+.cf-shell .field input:not([type='checkbox']),
+.cf-shell .field select {
+  min-height: 42px;
+}
+.cf-shell .modal {
+  color: var(--ui-text);
+  background: #fff;
+}
+.cf-shell .modal > header h2 {
+  font-size: 21px;
+}
+.cf-shell .modal > header small,
+.cf-shell .modal-footer > span {
+  font-size: 13px;
+  color: var(--ui-muted);
+  letter-spacing: 0;
+}
+.cf-shell .modal-footer {
+  background: #fafafa;
+}
+.cf-shell .tabs,
+.cf-shell .detail-tabs {
+  gap: 3px;
+  padding: 4px;
+  background: #f1f1f1;
+  border: 0;
+  border-radius: 9px;
+  overflow-x: auto;
+}
+.cf-shell .detail-tabs {
+  margin-bottom: 24px;
+}
+.cf-shell .tabs button,
+.cf-shell .detail-tabs button {
+  padding: 9px 13px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #626262;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.cf-shell .tabs button.active,
+.cf-shell .detail-tabs button.active {
+  color: #222;
+  background: #fff;
+  border-color: #d9d9d9;
+  box-shadow: 0 1px 3px #00000012;
+  font-weight: 500;
+}
+.cf-shell .detail-tabs button.active:after {
+  display: none;
+}
+.cf-shell .tabs button span {
+  font-size: 12px;
+}
+.cf-shell .content:has(.home-search) > .page-heading h1 {
+  font-size: 34px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.cf-shell .content:has(.home-search) > .page-heading p {
+  font-size: 15px;
+}
+.cf-shell .home-search span {
+  font-size: 16px;
+}
+.cf-shell .home-shortcuts button,
+.cf-shell .home-shortcuts section:last-child button {
+  font-size: 14px;
+}
+.cf-shell .home-section-label span {
+  font-size: 13px;
+}
+.global-search-caption,
+.search-result-content small,
+.search-result-meta,
+.global-search-panel footer {
+  font-size: 13px;
+}
+.search-result-content strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+.search-no-results {
+  font-size: 14px;
+}
+.cf-shell .sidebar nav button {
+  font-size: 14px;
+  font-weight: 400;
+}
+.cf-shell .sidebar nav button.active {
+  font-weight: 500;
+}
+.cf-shell .sidebar .brand b {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.cf-shell .store-switch strong,
+.cf-shell .profile strong {
+  font-size: 13px;
+  font-weight: 500;
+}
+.cf-shell .sidebar-search span {
+  font-size: 13px;
+}
+.cf-shell .nav-caption,
+.cf-shell .store-switch small,
+.cf-shell .profile small,
+.cf-shell .demo-box,
+.cf-shell .demo-box p {
+  font-size: 12px;
+  letter-spacing: 0;
+  color: #737373;
+}
+.cf-shell .sidebar-search kbd {
+  font-size: 10px;
+}
+.cf-shell .sidebar-search {
+  gap: 7px;
+  padding-left: 9px;
+  padding-right: 9px;
+}
+.cf-shell .app-footer,
+.cf-shell .app-footer small {
+  font-size: 12px;
+}
+.cf-login-intro h1 {
+  font-size: 30px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+.cf-login-intro p,
+.cf-login-submit {
+  font-size: 15px;
+}
+.cf-login-header-note,
+.cf-login-card-head,
+.cf-role-options small,
+.cf-login-note,
+.cf-login-footer {
+  font-size: 13px;
+  color: var(--ui-muted);
+}
+.cf-role-options button.selected {
+  background: #f5f9ff;
+  border-color: var(--ui-blue);
+  box-shadow: 0 0 0 1px var(--ui-blue);
+}
+.cf-role-options button:hover {
+  background: #f5f9ff;
+  border-color: #9cbbec;
+}
+.cf-role-options svg {
+  color: var(--ui-blue);
+}
+.cf-shell .modal-backdrop {
+  background: #16161655;
+}
+.cf-shell .modal {
+  box-shadow: 0 20px 70px #00000024;
+}
+.cf-shell .timeline strong,
+.cf-shell .attachment strong,
+.cf-shell .distribution > div > div:first-child,
+.cf-shell .permissions,
+.cf-shell .paragraph,
+.cf-shell .report-grid p,
+.cf-shell .notice p,
+.cf-shell .empty p {
+  font-size: 14px;
+  color: var(--ui-muted);
+}
+.cf-shell .timeline p,
+.cf-shell .distribution small,
+.cf-shell .exam-readings small,
+.cf-shell .exam-readings p,
+.cf-shell .exam-layout > div > small {
+  font-size: 13px;
+  color: var(--ui-muted);
+}
+.cf-shell .permissions td,
+.cf-shell .permissions th,
+.cf-shell .distribution strong {
+  color: var(--ui-text);
+}
+.cf-shell .exam-toolbar select,
+.cf-shell .check-label {
+  font-size: 14px;
+}
+.cf-shell .check-label {
+  color: var(--ui-muted);
+}
+.cf-shell .legend {
+  font-size: 13px;
+  flex-wrap: wrap;
+  row-gap: 7px;
+}
+.cf-shell .exam-toolbar {
+  flex-wrap: wrap;
+}
+@media (max-width: 650px) {
+  .cf-shell .sidebar nav button {
+    font-size: 11px;
+    line-height: 1.3;
+  }
+  .cf-shell h1 {
+    font-size: 24px;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading h1 {
+    font-size: 27px;
+    padding-right: 0;
+  }
+  .cf-shell .content:has(.home-search) > .page-heading p {
+    font-size: 14px;
+  }
+  .cf-shell .home-search span {
+    font-size: 14px;
+  }
+  .cf-shell .field input,
+  .cf-shell .field select,
+  .cf-shell .field textarea,
+  .cf-shell .search input {
+    font-size: 16px;
+  }
+  .cf-shell .section-title,
+  .cf-shell .record-heading {
+    flex-wrap: wrap;
+  }
+  .cf-shell .record-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .cf-shell .tabs {
+    max-width: 100%;
+  }
+  .cf-shell .tabs button,
+  .cf-shell .detail-tabs button {
+    padding: 9px 11px;
+  }
+  .cf-shell .intake-actions {
+    bottom: calc(68px + env(safe-area-inset-bottom, 0px));
+  }
+  .cf-login-intro h1 {
+    font-size: 27px;
+  }
+}
