@@ -791,6 +791,42 @@ describe('演示 API', () => {
     expect((await req('/customers/demo-1/profile', 'PUT', {})).status).toBe(404);
     expect((await req('/followups/demo-1-follow', 'PUT', { result: '测试' })).status).toBe(404);
   });
+  it('Excel 数据只包含本门店有效档案，最新听力排除误删检查，关联记录随客户隐藏', async () => {
+    db.prepare('INSERT INTO exams(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)').run(
+      'latest-exam',
+      'demo-store',
+      'demo-1',
+      '2026-09-27',
+      JSON.stringify({ right: [], left: [], conclusion: '最近检查' }),
+    );
+    db.prepare(
+      'INSERT INTO exams(id,tenant_id,customer_id,date,data,deleted_at) VALUES(?,?,?,?,?,?)',
+    ).run('removed-exam', 'demo-store', 'demo-1', '2026-09-28', '{}', '2026-09-28 10:00:00');
+    const exported = (await (await req('/export/spreadsheet')).json()) as any;
+    expect(exported.customers.some((row: any) => row.id === 'demo-1')).toBe(true);
+    expect(
+      exported.exams.filter((row: any) => row.customer_id === 'demo-1').map((row: any) => row.id),
+    ).toEqual(['latest-exam']);
+    expect(exported.fittings.some((row: any) => row.customer_id === 'demo-1')).toBe(true);
+    expect(exported.customers[0]).not.toHaveProperty('history');
+    db.prepare('UPDATE customers SET deleted_at=? WHERE id=?').run('2026-09-28 10:00:00', 'demo-1');
+    const after = (await (await req('/export/spreadsheet')).json()) as any;
+    for (const key of ['customers', 'exams', 'fittings', 'repairs', 'followups']) {
+      expect(
+        after[key].some((row: any) => row.id === 'demo-1' || row.customer_id === 'demo-1'),
+      ).toBe(false);
+    }
+    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
+      'another-store-export',
+      '店主',
+      'other-store',
+      Date.now() + 10000,
+    );
+    cookie = 'hearing_session=another-store-export';
+    expect(((await (await req('/export/spreadsheet')).json()) as any).customers).toEqual([]);
+    cookie = '';
+    expect((await req('/export/spreadsheet')).status).toBe(401);
+  });
   it('拒绝跨站写请求', async () => {
     expect(
       (await req('/login', 'POST', { role: '店主' }, { Origin: 'https://evil.example' })).status,

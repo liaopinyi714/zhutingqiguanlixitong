@@ -1197,3 +1197,68 @@ textarea:focus-visible {
     grid-template-columns: 1fr;
   }
 }
+
+.export-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 0 0 25px;
+}
+.cf-shell .customer-list-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+@media (max-width: 650px) {
+  .cf-shell .page-heading:has(.customer-list-actions) {
+    flex-wrap: wrap;
+  }
+  .cf-shell .customer-list-actions {
+    justify-content: flex-start;
+  }
+}
+.cf-shell .export-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 22px;
+  border-color: #e1e3e7;
+}
+.cf-shell .export-card.primary-export {
+  border-color: #bfd4f4;
+}
+.cf-shell .export-card-icon {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e1e3e7;
+  border-radius: 8px;
+  color: #5d6671;
+  margin-bottom: 16px;
+}
+.cf-shell .export-card h2 {
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 0 0 8px;
+}
+.cf-shell .export-card p {
+  color: #646b74;
+  font-size: 14px;
+  line-height: 1.7;
+  margin: 0 0 20px;
+  flex: 1;
+}
+.cf-shell .export-card .button {
+  min-height: 39px;
+}
+@media (max-width: 700px) {
+  .export-options {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .cf-shell .export-card {
+    padding: 18px;
+  }
+}

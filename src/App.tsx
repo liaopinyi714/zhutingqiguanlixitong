@@ -663,6 +663,7 @@ export default function App() {
     [searchBusy, setSearchBusy] = useState(false),
     [searchError, setSearchError] = useState(''),
     [searchActive, setSearchActive] = useState(0),
+    [excelBusy, setExcelBusy] = useState(''),
     [filter, setFilter] = useState('全部客户'),
     [editorKind, setEditorKind] = useState(''),
     [toast, setToast] = useState(''),
@@ -1278,6 +1279,34 @@ export default function App() {
       flash('档案已导出，附件请在档案中单独下载');
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+  async function exportSpreadsheet(kind: 'core' | 'extended') {
+    if (excelBusy) return;
+    setExcelBusy(kind);
+    setError('');
+    try {
+      const snapshot = await api('/export/spreadsheet');
+      const [{ makeSheets }, { buildXlsx }] = await Promise.all([
+        import('./spreadsheetExport'),
+        import('./xlsx'),
+      ]);
+      const bytes = buildXlsx(makeSheets(snapshot, kind));
+      const url = URL.createObjectURL(
+        new Blob([bytes], {
+          type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        }),
+      );
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `聆序-${kind === 'core' ? '客户核心信息' : '客户业务数据'}-${today()}.xlsx`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      flash(kind === 'core' ? '核心信息表格已下载' : '业务数据表格已下载');
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setExcelBusy('');
     }
   }
   const filtered = customers.filter(
@@ -2050,10 +2079,20 @@ export default function App() {
                 <div>
                   <h1>客户档案</h1>
                 </div>
-                <button className="button primary" onClick={() => openForm('customer')}>
-                  <Plus size={18} />
-                  新建客户
-                </button>
+                <div className="button-row customer-list-actions">
+                  <button
+                    className="button"
+                    disabled={!!excelBusy}
+                    onClick={() => exportSpreadsheet('core')}
+                  >
+                    <ArrowDownToLine size={17} />
+                    {excelBusy === 'core' ? '正在生成…' : '导出 Excel'}
+                  </button>
+                  <button className="button primary" onClick={() => openForm('customer')}>
+                    <Plus size={18} />
+                    新建客户
+                  </button>
+                </div>
               </div>
               <section className="panel">
                 <div className="list-toolbar">
@@ -2964,12 +3003,40 @@ export default function App() {
                 <div>
                   <h1>客户与服务统计</h1>
                 </div>
-                {role === '店主' && (
-                  <button className="button" onClick={exportData}>
-                    <ArrowDownToLine size={17} />
-                    导出档案
+              </div>
+              <div className="export-options">
+                <section className="panel export-card primary-export">
+                  <div className="export-card-icon">
+                    <ArrowDownToLine size={20} />
+                  </div>
+                  <h2>核心信息表格</h2>
+                  <p>
+                    每位客户一行。姓名、年龄、联系方式、住址及全部历史验配型号和左右耳序列号，适合脱离网站查找。
+                  </p>
+                  <button
+                    className="button primary"
+                    disabled={!!excelBusy}
+                    onClick={() => exportSpreadsheet('core')}
+                  >
+                    {excelBusy === 'core' ? '正在生成…' : '下载核心信息 Excel'}
                   </button>
-                )}
+                </section>
+                <section className="panel export-card">
+                  <div className="export-card-icon">
+                    <ArrowDownToLine size={20} />
+                  </div>
+                  <h2>业务数据表格</h2>
+                  <p>
+                    包含相同的核心信息表，另按最新听力、验配设备、维修和随访分表；每行标有客户姓名与档案编号。
+                  </p>
+                  <button
+                    className="button"
+                    disabled={!!excelBusy}
+                    onClick={() => exportSpreadsheet('extended')}
+                  >
+                    {excelBusy === 'extended' ? '正在生成…' : '下载业务数据 Excel'}
+                  </button>
+                </section>
               </div>
               <div className="stats-grid">
                 <Stat
@@ -3111,15 +3178,18 @@ export default function App() {
                 </section>
                 <section className="panel padded">
                   <div className="section-title">
-                    <h2>资料导出</h2>
+                    <h2>数据导出</h2>
                     <ArrowDownToLine size={20} />
                   </div>
+                  <button className="button full" onClick={() => navigate('reports')}>
+                    打开 Excel 导出
+                    <ChevronRight size={16} />
+                  </button>
                   <p className="muted paragraph">
-                    导出客户、听力检查、验配、维修、随访与操作记录的 JSON
-                    数据。包含附件目录；原始报告请在客户档案中单独下载。
+                    需要完整原始记录时，可保留一份 JSON 备份。附件文件需在客户档案中单独下载。
                   </p>
                   <button className="button full" disabled={role !== '店主'} onClick={exportData}>
-                    导出全部档案
+                    下载 JSON 备份
                   </button>
                   <div className="notice">
                     <ShieldCheck size={20} />
