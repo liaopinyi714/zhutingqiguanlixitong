@@ -19,6 +19,18 @@ const snapshot: Snapshot = {
       status: '已验配',
       source: '转介绍',
     },
+    {
+      id: 'customer-without-device',
+      name: '尚未验配客户',
+      gender: '男',
+      birth_date: '',
+      phone: '000888',
+      contact: '儿子',
+      contact_phone: '000999',
+      address: '另一处地址',
+      status: '待评估',
+      source: '自然到店',
+    },
   ],
   exams: [
     {
@@ -109,18 +121,31 @@ function zipEntry(bytes: Uint8Array, path: string) {
 }
 
 describe('离线 Excel 导出', () => {
-  it('核心表一位客户一行，包含稳定编号、本人和亲属联系方式以及左右耳历史设备', () => {
-    const [core] = makeSheets(snapshot, 'core');
-    expect(core.rows).toHaveLength(1);
-    expect(core.rows[0][4]).toBe('001234');
-    expect(core.rows[0][6]).toBe('0005566');
-    expect(core.rows[0][11]).toBe('stable-customer-id');
-    expect(core.rows[0][10]).toContain('2024-01-01  旧品牌 · 旧型号  左耳：000L');
-    expect(core.rows[0][10]).toContain('左耳：111L；右耳：222R');
+  it('核心导出按有效验配记录拆为两张互不重复的客户表，删除年龄列并保留关键字段', () => {
+    const [fitted, unfitted] = makeSheets(snapshot, 'core');
+    expect([fitted.name, unfitted.name]).toEqual(['已验配客户', '未验配客户']);
+    expect(fitted.headers).toEqual(unfitted.headers);
+    expect(fitted.headers).not.toContain('年龄（导出时）');
+    expect(fitted.rows).toHaveLength(1);
+    expect(unfitted.rows).toHaveLength(1);
+    expect(fitted.rows[0][3]).toBe('001234');
+    expect(fitted.rows[0][5]).toBe('0005566');
+    expect(fitted.rows[0][10]).toBe('stable-customer-id');
+    expect(fitted.rows[0][9]).toContain('2024-01-01  旧品牌 · 旧型号  左耳：000L');
+    expect(fitted.rows[0][9]).toContain('左耳：111L；右耳：222R');
+    expect(unfitted.rows[0][0]).toBe('尚未验配客户');
+    expect(unfitted.rows[0][9]).toBe('');
+    expect(unfitted.rows[0][10]).toBe('customer-without-device');
+    const emptyFittings = makeSheets({ ...snapshot, fittings: [] }, 'core');
+    expect(emptyFittings.map((sheet) => sheet.rows.length)).toEqual([0, 2]);
+    expect(buildXlsx(emptyFittings)[0]).toBe(0x50);
   });
-  it('扩展表保留同一核心表，其他每张表带客户姓名和稳定编号，听力只取整理后的数值', () => {
-    const [core, hearing, devices, repairs, followups] = makeSheets(snapshot, 'extended');
-    expect(core).toEqual(makeSheets(snapshot, 'core')[0]);
+  it('业务导出完整保留两张客户表，其他每张表带姓名和编号，听力只取整理后的数值', () => {
+    const [fitted, unfitted, hearing, devices, repairs, followups] = makeSheets(
+      snapshot,
+      'extended',
+    );
+    expect([fitted, unfitted]).toEqual(makeSheets(snapshot, 'core'));
     for (const sheet of [hearing, devices, repairs, followups]) {
       expect(sheet.headers.slice(0, 2)).toEqual(['客户姓名', '档案编号']);
       expect(sheet.rows[0].slice(0, 2)).toEqual(['=测试客户', 'stable-customer-id']);
@@ -139,7 +164,8 @@ describe('离线 Excel 导出', () => {
     expect(bytes[1]).toBe(0x4b);
     const book = zipEntry(bytes, 'xl/workbook.xml');
     const first = zipEntry(bytes, 'xl/worksheets/sheet1.xml');
-    expect(book).toContain('客户核心信息');
+    expect(book).toContain('已验配客户');
+    expect(book).toContain('未验配客户');
     expect(book).toContain('最新听力');
     expect(first).toContain('state="frozen"');
     expect(first).toContain('<autoFilter');

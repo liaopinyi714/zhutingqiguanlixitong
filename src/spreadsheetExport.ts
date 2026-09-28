@@ -20,17 +20,6 @@ export type Snapshot = {
 const frequencies = [250, 500, 1000, 2000, 4000, 8000];
 const blank = (value: unknown): string => (value == null ? '' : String(value));
 const json = (value: string) => JSON.parse(value || '{}');
-function age(birth: string, asOf: Date): number | null {
-  if (!birth || !/^\d{4}-\d{2}-\d{2}$/.test(birth)) return null;
-  const [year, month, day] = birth.split('-').map(Number);
-  const years =
-    asOf.getFullYear() -
-    year -
-    (asOf.getMonth() + 1 < month || (asOf.getMonth() + 1 === month && asOf.getDate() < day)
-      ? 1
-      : 0);
-  return years >= 0 ? years : null;
-}
 function model(device: any): string {
   return [device.brand, device.series, device.model].filter(Boolean).join(' · ') || '型号未填写';
 }
@@ -55,7 +44,6 @@ function average(curve: any[]): Cell {
   return Array.isArray(curve) ? pta(curve) : null;
 }
 export function makeSheets(data: Snapshot, kind: 'core' | 'extended'): Sheet[] {
-  const asOf = new Date(data.exportedAt);
   const customers = data.customers;
   const customerIndex = new Map<string, any>(customers.map((c) => [c.id, c]));
   const byCustomer = (id: string) => customerIndex.get(id);
@@ -67,26 +55,23 @@ export function makeSheets(data: Snapshot, kind: 'core' | 'extended'): Sheet[] {
       ...(fittingGroups.get(fitting.customer_id) || []),
       fitting,
     ]);
-  const core: Sheet = {
-    name: '客户核心信息',
-    headers: [
-      '客户姓名',
-      '性别',
-      '年龄（导出时）',
-      '出生日期',
-      '本人电话',
-      '其他联系人',
-      '其他联系人电话',
-      '住址',
-      '服务阶段',
-      '客户来源',
-      '历次验配设备（日期、型号、左右耳序列号）',
-      '档案编号',
-    ],
-    rows: customers.map((c) => [
+  const coreHeaders = [
+    '客户姓名',
+    '性别',
+    '出生日期',
+    '本人电话',
+    '其他联系人',
+    '其他联系人电话',
+    '住址',
+    '服务阶段',
+    '客户来源',
+    '历次验配设备（日期、型号、左右耳序列号）',
+    '档案编号',
+  ];
+  const coreRows = (list: any[]): Cell[][] =>
+    list.map((c) => [
       c.name,
       c.gender,
-      age(c.birth_date, asOf),
       c.birth_date,
       c.phone,
       c.contact,
@@ -98,11 +83,24 @@ export function makeSheets(data: Snapshot, kind: 'core' | 'extended'): Sheet[] {
         .map((f) => `${f.date}  ${model(f)}  ${serials(f)}`)
         .join('\n'),
       c.id,
-    ]),
-    widths: [18, 9, 15, 15, 20, 18, 22, 38, 14, 18, 75, 38],
-    wrapColumns: [11],
-  };
-  if (kind === 'core') return [core];
+    ]);
+  const coreSheets: Sheet[] = [
+    {
+      name: '已验配客户',
+      headers: coreHeaders,
+      rows: coreRows(customers.filter((c) => fittingGroups.has(c.id))),
+      widths: [18, 9, 15, 20, 18, 22, 38, 14, 18, 75, 38],
+      wrapColumns: [10],
+    },
+    {
+      name: '未验配客户',
+      headers: coreHeaders,
+      rows: coreRows(customers.filter((c) => !fittingGroups.has(c.id))),
+      widths: [18, 9, 15, 20, 18, 22, 38, 14, 18, 75, 38],
+      wrapColumns: [10],
+    },
+  ];
+  if (kind === 'core') return coreSheets;
   const latest = data.exams.map((row) => ({ ...json(row.data), ...row }));
   const hearingSheet: Sheet = {
     name: '最新听力',
@@ -217,5 +215,5 @@ export function makeSheets(data: Snapshot, kind: 'core' | 'extended'): Sheet[] {
     widths: [18, 38, 15, 18, 14, 22, 48],
     wrapColumns: [7],
   };
-  return [core, hearingSheet, fittingSheet, repairSheet, followupSheet];
+  return [...coreSheets, hearingSheet, fittingSheet, repairSheet, followupSheet];
 }
