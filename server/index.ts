@@ -12,6 +12,7 @@ import {
 import { purgeExpiredRecords, retentionCutoff } from './retention';
 import { bodyLimit } from 'hono/body-limit';
 import { accessSession, AuthError, isLocalDemo, type AuthEnv, type Session } from './auth';
+import { accountRoutes, resolveAccount } from './accounts';
 type Env = AuthEnv & { DB: D1Database; FILES: R2Bucket };
 export const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
 const id = () => crypto.randomUUID();
@@ -45,7 +46,10 @@ app.use('/api/*', async (c, next) => {
     return next();
   }
   if (!demo) {
-    c.set('session', await accessSession(c.req.raw, c.env));
+    c.set(
+      'session',
+      await accessSession(c.req.raw, c.env, (email) => resolveAccount(c.env, email)),
+    );
     return next();
   }
   const token = getCookie(c, 'hearing_session');
@@ -54,13 +58,10 @@ app.use('/api/*', async (c, next) => {
         .bind(token, Date.now())
         .first<{ role: string; tenant_id: string }>()
     : null;
-  if (!s || !['店主', '验配师', '前台'].includes(s.role))
-    return c.json({ error: '请先登录工作台' }, 401);
+  if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
   c.set('session', {
-    ...s,
-    actor: s.role,
-    name: `演示${s.role}`,
-    storeName: '聆序听力 · 演示门店',
+    ...(await resolveAccount(c.env, 'owner@demo.invalid', true)),
+    tenant_id: s.tenant_id,
   });
   await next();
 });
@@ -74,8 +75,7 @@ app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
 app.get('/api/auth/start', (c) => c.redirect('/'));
 app.post('/api/login', async (c) => {
   const data = await c.req.json();
-  if (!['店主', '验配师', '前台'].includes(data.role))
-    return c.json({ error: '请选择演示角色' }, 400);
+  if (data.role !== '店主') return c.json({ error: '仅支持店主登录' }, 400);
   const token = id() + id();
   await c.env.DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(Date.now()).run();
   await c.env.DB.prepare('INSERT INTO sessions VALUES(?,?,?,?)')
@@ -100,6 +100,7 @@ app.post('/api/logout', async (c) => {
   deleteCookie(c, 'hearing_session', { path: '/' });
   return c.json({ ok: true });
 });
+app.route('/api/accounts', accountRoutes);
 const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date, contactPhone: r.contact_phone });
 app.get('/api/customers', async (c) => {
   const rows = await c.env.DB.prepare(
@@ -667,6 +668,40 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
     return c.json({ ok: true });
   });
 }
+app.get('/api/devices', async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT f.id,f.customer_id,f.date,c.name,c.phone,f.data,
+      (SELECT COUNT(*) FROM repairs r WHERE r.fitting_id=f.id AND r.customer_id=f.customer_id AND r.tenant_id=f.tenant_id AND r.deleted_at IS NULL) AS repair_count
+     FROM fittings f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL
+     WHERE f.tenant_id=? AND f.deleted_at IS NULL ORDER BY f.date DESC`,
+  )
+    .bind(c.get('session').tenant_id)
+    .all();
+  return c.json(
+    rows.results.map((r: any) => {
+      const { data, ...record } = r;
+      return { ...JSON.parse(data), ...record };
+    }),
+  );
+});
+app.get('/api/repairs', async (c) => {
+  const rows = await c.env.DB.prepare(
+    `SELECT r.*,c.name,c.phone,f.data AS device_data
+     FROM repairs r
+     JOIN customers c ON c.id=r.customer_id AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
+     JOIN fittings f ON f.id=r.fitting_id AND f.customer_id=r.customer_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
+     WHERE r.tenant_id=? AND r.deleted_at IS NULL
+     ORDER BY CASE r.status WHEN '待送修' THEN 0 WHEN '维修中' THEN 1 ELSE 2 END,r.occurred_date DESC`,
+  )
+    .bind(c.get('session').tenant_id)
+    .all();
+  return c.json(
+    rows.results.map((r: any) => {
+      const { device_data, ...record } = r;
+      return { ...record, device: { ...JSON.parse(device_data), id: r.fitting_id } };
+    }),
+  );
+});
 app.get('/api/warranties', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT f.id,f.customer_id,c.name,c.phone,f.data

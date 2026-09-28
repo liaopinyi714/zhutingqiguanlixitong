@@ -103,10 +103,6 @@ export function pta(points: { frequency: number; value: number | null; noRespons
     ? null
     : Math.round((selected.reduce((n, p) => n + p!.value!, 0) / 4) * 10) / 10;
 }
-export function canWrite(role: string, resource: string) {
-  return (
-    role === '店主' ||
-    role === '验配师' ||
-    (role === '前台' && ['customer', 'followup'].includes(resource))
-  );
+export function canWrite(role: string, _resource: string) {
+  return role === '店主';
 }

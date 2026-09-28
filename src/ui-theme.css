@@ -1,20 +1,4 @@
 /* Shared visual system for the dashboard, customer records, and login. */
-@media (min-width: 651px) {
-  .cf-shell .sidebar nav svg, .cf-shell .sidebar-search svg { stroke-width: 1.4; color: #858585; }
-  .cf-shell .sidebar-toggle { justify-content: flex-start; padding: 14px 8px; margin-top: 10px; }
-  .cf-shell.sidebar-collapsed .main { margin-left: 56px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar { width: 56px; padding: 16px 7px 0; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar .brand { margin-bottom: 0; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .brand-icon { width: 28px; height: 28px; border-radius: 6px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .brand-icon svg { width: 21px; height: 21px; stroke-width: 1.5; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-search { border: 0; background: transparent; box-shadow: none; margin: 18px 0 8px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav { gap: 7px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav button { padding: 12px 0; border-radius: 6px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar nav svg { width: 18px; height: 18px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .profile { display: none; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-bottom { min-height: 62px; }
-  .cf-shell.sidebar-collapsed:not(.sidebar-peek) .sidebar-toggle { padding: 16px 0; margin-top: 10px; }
-}
 :root {
   font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   font-size: 15px;
@@ -214,22 +198,6 @@ tr:focus-visible {
 .cf-shell .field select {
   min-height: 42px;
 }
-.cf-shell .modal {
-  color: var(--ui-text);
-  background: #fff;
-}
-.cf-shell .modal > header h2 {
-  font-size: 21px;
-}
-.cf-shell .modal > header small,
-.cf-shell .modal-footer > span {
-  font-size: 13px;
-  color: var(--ui-muted);
-  letter-spacing: 0;
-}
-.cf-shell .modal-footer {
-  background: #fafafa;
-}
 .cf-shell .tabs,
 .cf-shell .detail-tabs {
   gap: 3px;
@@ -298,47 +266,6 @@ tr:focus-visible {
 .search-no-results {
   font-size: 14px;
 }
-.cf-shell .sidebar nav button {
-  font-size: 14px;
-  font-weight: 400;
-}
-.cf-shell .sidebar nav button.active {
-  font-weight: 500;
-}
-.cf-shell .sidebar .brand b {
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-.cf-shell .store-switch strong,
-.cf-shell .profile strong {
-  font-size: 13px;
-  font-weight: 500;
-}
-.cf-shell .sidebar-search span {
-  font-size: 13px;
-}
-.cf-shell .nav-caption,
-.cf-shell .store-switch small,
-.cf-shell .profile small,
-.cf-shell .demo-box,
-.cf-shell .demo-box p {
-  font-size: 12px;
-  letter-spacing: 0;
-  color: #737373;
-}
-.cf-shell .sidebar-search kbd {
-  font-size: 10px;
-}
-.cf-shell .sidebar-search {
-  gap: 7px;
-  padding-left: 9px;
-  padding-right: 9px;
-}
-.cf-shell .app-footer,
-.cf-shell .app-footer small {
-  font-size: 12px;
-}
 .cf-login-intro h1 {
   font-size: 30px;
   font-weight: 600;
@@ -367,12 +294,6 @@ tr:focus-visible {
 }
 .cf-role-options svg {
   color: var(--ui-blue);
-}
-.cf-shell .modal-backdrop {
-  background: #16161655;
-}
-.cf-shell .modal {
-  box-shadow: 0 20px 70px #00000024;
 }
 .cf-shell .timeline strong,
 .cf-shell .attachment strong,
@@ -414,10 +335,6 @@ tr:focus-visible {
   flex-wrap: wrap;
 }
 @media (max-width: 650px) {
-  .cf-shell .sidebar nav button {
-    font-size: 11px;
-    line-height: 1.3;
-  }
   .cf-shell h1 {
     font-size: 24px;
   }

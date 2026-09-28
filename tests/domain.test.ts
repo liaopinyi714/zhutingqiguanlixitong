@@ -35,10 +35,10 @@ describe('听力数据', () => {
     input.left[0].value = 125;
     expect(examSchema.safeParse(input).success).toBe(false);
   });
-  it('前台无法录入检查和验配', () => {
+  it('只有店主拥有写入权限', () => {
     expect(canWrite('前台', 'exam')).toBe(false);
     expect(canWrite('前台', 'fitting')).toBe(false);
-    expect(canWrite('前台', 'followup')).toBe(true);
-    expect(canWrite('验配师', 'exam')).toBe(true);
+    expect(canWrite('前台', 'followup')).toBe(false);
+    expect(canWrite('验配师', 'exam')).toBe(false);
   });
 });

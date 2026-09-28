@@ -36,6 +36,7 @@ const staffSchema = z
         .email()
         .transform((s) => s.toLowerCase()),
       name: z.string().trim().min(1).max(60),
+      // Accept legacy configuration syntax without granting legacy roles access.
       role: z.enum(['店主', '验配师', '前台']),
       tenantId: z
         .string()
@@ -74,7 +75,11 @@ export function readStaffAccounts(raw: string | undefined) {
   }
 }
 const keySets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
-export async function accessSession(request: Request, env: AuthEnv): Promise<Session> {
+export async function accessSession(
+  request: Request,
+  env: AuthEnv,
+  lookup?: (email: string) => Promise<Session>,
+): Promise<Session> {
   const domain = env.ACCESS_TEAM_DOMAIN || '';
   const audience = env.ACCESS_AUD || '';
   if (
@@ -108,8 +113,10 @@ export async function accessSession(request: Request, env: AuthEnv): Promise<Ses
   } catch {
     throw new AuthError('无法验证登录身份，请重新登录', 401);
   }
+  if (lookup) return lookup(email);
   const account = staff.find((entry) => entry.email === email);
-  if (!account) throw new AuthError('该员工尚未获得门店访问权限，请联系管理员', 403);
+  if (!account || account.role !== '店主')
+    throw new AuthError('该员工尚未获得门店访问权限，请联系管理员', 403);
   return {
     role: account.role,
     tenant_id: account.tenantId,

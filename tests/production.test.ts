@@ -202,6 +202,87 @@ describe('正式环境', () => {
     expect(await (await req('/customers', jwt)).json()).toEqual([]);
     expect((await req(`/customers/${saved.id}/detail`, jwt)).status).toBe(404);
   });
+  it('账户名称可修改，新增店主通过有效 JWT 登录，停用立即生效且不能停用自己', async () => {
+    const jwt = await token();
+    expect(
+      (await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: true }))
+        .status,
+    ).toBe(200);
+    expect(((await (await req('/me', jwt)).json()) as any).name).toBe('新名称');
+    expect(
+      (await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: false }))
+        .status,
+    ).toBe(400);
+    const colleague = { email: 'second@example.com', name: '另一店主', enabled: true };
+    const secondJwt = await token({ email: colleague.email });
+    expect((await req('/me', secondJwt)).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', colleague)).status).toBe(200);
+    expect(((await (await req('/me', secondJwt)).json()) as any).role).toBe('店主');
+    expect((await req('/accounts', jwt, 'PUT', { ...colleague, enabled: false })).status).toBe(200);
+    expect((await req('/me', secondJwt)).status).toBe(403);
+    expect((await req('/customers', secondJwt)).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', colleague)).status).toBe(200);
+    expect((await req('/me', secondJwt)).status).toBe(200);
+    expect(
+      (db.prepare("SELECT COUNT(*) n FROM audit WHERE action LIKE '%店主账户%'").get() as any).n,
+    ).toBe(4);
+    env.STAFF_ACCOUNTS = JSON.stringify([{ ...owner, email: 'replacement@example.com' }]);
+    expect((await req('/me', jwt)).status).toBe(403);
+  });
+  it('账户管理按门店隔离，不能抢占其他门店邮箱，拒绝未授权和无效提交', async () => {
+    const jwt = await token();
+    const other = {
+      ...owner,
+      email: 'other@example.com',
+      tenantId: 'store-002',
+      storeName: '另一门店',
+    };
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, other]);
+    expect(
+      (await req('/accounts', jwt, 'PUT', { email: other.email, name: '抢占', enabled: true }))
+        .status,
+    ).toBe(409);
+    expect(
+      (await req('/accounts', jwt, 'PUT', { email: 'bad', name: '', enabled: true })).status,
+    ).toBe(400);
+    const managed = { email: 'managed@example.com', name: '店主二', enabled: true };
+    expect((await req('/accounts', jwt, 'PUT', managed)).status).toBe(200);
+    const otherJwt = await token({ email: other.email });
+    expect(
+      ((await (await req('/accounts', otherJwt)).json()) as any[]).map((a) => a.email),
+    ).toEqual([other.email]);
+    expect((await req('/accounts', otherJwt, 'PUT', managed)).status).toBe(409);
+    expect((await req('/accounts')).status).toBe(401);
+    expect(
+      (await req('/accounts', await token({ email: 'stranger@example.com' }), 'PUT', managed))
+        .status,
+    ).toBe(403);
+  });
+  it('停用配置中的店主同样会拒绝已有 JWT，旧角色不会自动变为店主', async () => {
+    const second = { ...owner, email: 'second@example.com' };
+    env.STAFF_ACCOUNTS = JSON.stringify([
+      owner,
+      second,
+      { ...owner, email: 'legacy@example.com', role: '前台' },
+    ]);
+    const jwt = await token();
+    expect(
+      (
+        await req('/accounts', jwt, 'PUT', {
+          email: second.email,
+          name: second.name,
+          enabled: false,
+        })
+      ).status,
+    ).toBe(200);
+    expect((await req('/me', await token({ email: second.email }))).status).toBe(403);
+    expect((await req('/me', await token({ email: 'legacy@example.com' }))).status).toBe(403);
+    expect(
+      ((await (await req('/accounts', jwt)).json()) as any[]).some(
+        (a) => a.email === 'legacy@example.com',
+      ),
+    ).toBe(false);
+  });
   it('拒绝跨站写入、缺少校验头及过大请求', async () => {
     const jwt = await token();
     expect(

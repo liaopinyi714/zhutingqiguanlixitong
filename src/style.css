@@ -137,17 +137,6 @@ input[type='checkbox'] {
 .app-shell {
   min-height: 100vh;
 }
-.sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 232px;
-  background: #fcfdfb;
-  border-right: 1px solid #e3e8e1;
-  display: flex;
-  flex-direction: column;
-  padding: 32px 18px 15px;
-  z-index: 20;
-}
 .brand {
   display: flex;
   align-items: center;
@@ -178,94 +167,6 @@ input[type='checkbox'] {
   display: block;
   margin-top: 5px;
 }
-.store-switch {
-  margin: 35px 0 32px;
-  padding: 12px 8px;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-.store-mark {
-  width: 31px;
-  height: 32px;
-  background: #ecf0e9;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  color: #647767;
-  font-size: 13px;
-}
-.store-switch strong {
-  font-size: 12px;
-  font-weight: 550;
-  display: block;
-}
-.store-switch small {
-  font-size: 10px;
-  color: #98a098;
-  display: block;
-  margin-top: 5px;
-}
-.nav-caption {
-  font-size: 10px;
-  color: #9ba59d;
-  padding: 0 14px;
-  margin-bottom: 14px;
-  letter-spacing: 1px;
-}
-nav {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-nav button {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 13px 14px;
-  border: 0;
-  background: transparent;
-  border-radius: 7px;
-  color: #7c8980;
-  font-size: 13px;
-  text-align: left;
-}
-nav button:hover {
-  background: #f1f4ee;
-}
-nav button.active {
-  background: #e7efe7;
-  color: #225b4f;
-  font-weight: 600;
-}
-nav button b {
-  font-weight: 500;
-  margin-left: auto;
-  min-width: 21px;
-  line-height: 21px;
-  text-align: center;
-  border-radius: 4px;
-  font-size: 10px;
-  background: #ecf0e8;
-  color: #6d7e6e;
-}
-nav button.active b {
-  background: #d8e6d8;
-}
-.sidebar-bottom {
-  margin-top: auto;
-}
-.demo-box {
-  border: 1px solid #e5e9df;
-  border-radius: 7px;
-  background: #f6f8f1;
-  margin: 24px 6px 20px;
-  padding: 14px;
-  font-size: 11px;
-  color: #687762;
-}
 .demo-dot,
 .live-dot {
   display: inline-block;
@@ -275,24 +176,6 @@ nav button.active b {
   background: #839977;
   margin-right: 7px;
 }
-.demo-box p {
-  font-size: 10px;
-  color: #95a08b;
-  margin-top: 7px;
-  line-height: 1.9;
-}
-.profile {
-  display: flex;
-  align-items: center;
-  width: 100%;
-  gap: 9px;
-  border: 0;
-  background: transparent;
-  border-top: 1px solid var(--line);
-  padding: 19px 6px 0;
-  text-align: left;
-}
-.profile-avatar,
 .top-avatar {
   width: 32px;
   height: 32px;
@@ -302,25 +185,6 @@ nav button.active b {
   display: grid;
   place-items: center;
   font-size: 12px;
-}
-.profile strong {
-  font-size: 12px;
-  display: block;
-  font-weight: 550;
-}
-.profile small {
-  display: block;
-  color: #9ca69b;
-  font-size: 10px;
-  margin-top: 5px;
-}
-.profile > svg {
-  margin-left: auto;
-  color: #93a08f;
-}
-.main {
-  margin-left: 232px;
-  min-height: 100vh;
 }
 .topbar {
   height: 76px;
@@ -675,26 +539,6 @@ nav button.active b {
   background: #6e9680;
   min-width: 0;
 }
-.care-note {
-  background: #eaf0e5;
-  border: 1px solid #e1e8d9;
-  border-radius: 7px;
-  padding: 20px 24px;
-}
-.care-note > div {
-  display: flex;
-  gap: 11px;
-  align-items: center;
-  color: #617b53;
-  font-size: 12px;
-}
-.care-note p {
-  font-size: 10px;
-  color: #97a48a;
-  line-height: 1.9;
-  margin-top: 10px;
-  padding-left: 34px;
-}
 .recent-panel .panel-heading {
   padding-bottom: 15px;
 }
@@ -814,27 +658,6 @@ nav button.active b {
 .status-4 {
   background: #e9f0e7;
   color: #7a9571;
-}
-.app-footer {
-  height: 56px;
-  border-top: 1px solid #e6ebe1;
-  padding: 0 38px;
-  display: flex;
-  align-items: center;
-  color: #acb5a3;
-  font-size: 9px;
-  letter-spacing: 1px;
-}
-.app-footer > span {
-  letter-spacing: 0;
-  margin-left: 18px;
-  color: #bbc2b2;
-  font-size: 10px;
-}
-.app-footer small {
-  margin-left: auto;
-  font-size: 9px;
-  letter-spacing: 0;
 }
 .list-toolbar {
   padding: 20px 22px;
@@ -1394,55 +1217,6 @@ nav button.active b {
   color: #a2b191;
   padding: 70px;
 }
-.modal-backdrop {
-  position: fixed;
-  inset: 0;
-  background: #18372866;
-  backdrop-filter: blur(3px);
-  z-index: 50;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 25px;
-}
-.modal {
-  background: #fff;
-  border-radius: 11px;
-  width: min(680px, 100%);
-  max-height: 92vh;
-  box-shadow: 0 24px 100px #12302125;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-.modal.large {
-  width: min(1160px, 100%);
-}
-.modal > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 24px 28px;
-  border-bottom: 1px solid var(--line);
-}
-.modal > header small {
-  font-size: 9px;
-  letter-spacing: 1px;
-  color: #9aaa8b;
-}
-.modal > header h2 {
-  font-size: 20px;
-  margin-top: 7px;
-}
-.modal > form {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-.modal-body {
-  overflow: auto;
-  padding: 25px 28px;
-}
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1466,19 +1240,6 @@ nav button.active b {
 .field select {
   width: 100%;
   font-size: 12px;
-}
-.modal-footer {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 18px 28px;
-  border-top: 1px solid var(--line);
-  background: #fbfcf8;
-}
-.modal-footer > span {
-  margin-right: auto;
-  font-size: 10px;
-  color: #a6b399;
 }
 .error {
   border: 1px solid #e7c9bd;
@@ -1738,7 +1499,6 @@ nav button.active b {
 .page-heading p,
 .panel-heading p,
 .task-body p,
-.care-note p,
 .subtext,
 .person small,
 .stat p,
@@ -1804,14 +1564,6 @@ nav button.active b {
   }
 }
 @media (max-width: 1250px) {
-  .sidebar {
-    width: 205px;
-    padding-left: 13px;
-    padding-right: 13px;
-  }
-  .main {
-    margin-left: 205px;
-  }
   .content {
     padding: 28px 25px;
   }
@@ -1898,48 +1650,12 @@ nav button.active b {
   }
 }
 @media (max-width: 950px) {
-  .sidebar {
-    width: 76px;
-    padding: 25px 10px;
-  }
-  .sidebar .brand {
-    padding: 0;
-    justify-content: center;
-  }
-  .sidebar .brand > div,
-  .store-switch,
-  .nav-caption,
-  nav span,
-  nav b,
-  .demo-box,
-  .profile > div,
-  .profile > svg {
-    display: none;
-  }
-  .sidebar .brand {
-    margin-bottom: 40px;
-  }
-  .sidebar nav button {
-    justify-content: center;
-    padding: 15px 0;
-  }
-  .sidebar .profile {
-    justify-content: center;
-  }
-  .main {
-    margin-left: 76px;
-  }
   .dashboard-columns {
     grid-template-columns: 1fr;
   }
   .dashboard-side {
     display: grid;
     grid-template-columns: 1.3fr 1fr;
-  }
-  .care-note {
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
   }
   .task-body p {
     max-width: none;
@@ -1976,38 +1692,6 @@ nav button.active b {
   }
 }
 @media (max-width: 650px) {
-  .sidebar {
-    position: fixed;
-    inset: auto 0 0;
-    width: 100%;
-    height: 65px;
-    padding: 5px 8px;
-    border: 0;
-    border-top: 1px solid var(--line);
-    background: #fcfdfb;
-  }
-  .sidebar .brand,
-  .sidebar-bottom {
-    display: none;
-  }
-  .sidebar nav {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 3px;
-  }
-  .sidebar nav button {
-    padding: 7px 0;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 9px;
-  }
-  .sidebar nav span {
-    display: block;
-  }
-  .main {
-    margin-left: 0;
-    padding-bottom: 65px;
-  }
   .topbar {
     height: 58px;
     padding: 0 18px;
@@ -2055,9 +1739,6 @@ nav button.active b {
   }
   .dashboard-side {
     display: block;
-  }
-  .care-note {
-    margin-top: 15px;
   }
   .task-icon {
     display: none;
@@ -2180,14 +1861,6 @@ nav button.active b {
   .three .stat-value {
     font-size: 27px;
   }
-  .app-footer {
-    padding: 0 18px;
-    height: 50px;
-    font-size: 8px;
-  }
-  .app-footer > span {
-    display: none;
-  }
   .toast {
     bottom: 83px;
     left: 50%;
@@ -2196,32 +1869,8 @@ nav button.active b {
     font-size: 11px;
     padding: 13px 17px;
   }
-  .modal-backdrop {
-    padding: 12px;
-  }
-  .modal > header {
-    padding: 19px;
-  }
-  .modal-body {
-    padding: 19px;
-  }
   .form-grid {
     gap: 16px;
-  }
-  .modal-footer {
-    padding: 15px;
-  }
-  .modal-footer > span {
-    display: none;
-  }
-  .modal-footer > .button:first-of-type {
-    margin-left: auto;
-  }
-  .modal > header h2 {
-    font-size: 18px;
-  }
-  .modal {
-    max-height: 92vh;
   }
   .login {
     grid-template-columns: 1fr;
@@ -2272,19 +1921,13 @@ nav button.active b {
   }
 }
 @media print {
-  .sidebar,
   .topbar,
-  .app-footer,
   .back,
   .button,
   .detail-tabs,
   .toast,
-  .modal-backdrop,
   .customer-hero .button-row {
     display: none !important;
-  }
-  .main {
-    margin: 0;
   }
   .content {
     padding: 0;

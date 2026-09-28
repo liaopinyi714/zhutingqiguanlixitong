@@ -33,6 +33,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0005_record_lifecycle.sql', 'utf8'));
   db.exec(readFileSync('migrations/0006_attachment_retention.sql', 'utf8'));
   db.exec(readFileSync('migrations/0008_repairs.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0009_accounts.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -123,11 +124,7 @@ describe('演示 API', () => {
     const created = await req('/customers/demo-1/repairs', 'POST', data);
     expect(created.status).toBe(201);
     const repairId = ((await created.json()) as any).id;
-    const ownerCookie = cookie;
-    const frontdesk = await req('/login', 'POST', { role: '前台' });
-    cookie = frontdesk.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await req('/customers/demo-1/repairs', 'POST', data)).status).toBe(403);
-    cookie = ownerCookie;
+    expect((await req('/login', 'POST', { role: '前台' })).status).toBe(400);
     expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs[0].parts).toBe(
       '受话器 1 件',
     );
@@ -157,7 +154,69 @@ describe('演示 API', () => {
     await purgeExpiredRecords(env);
     expect(db.prepare('SELECT id FROM repairs WHERE id=?').get(repairId)).toBeUndefined();
   });
-  it('报告删除后无法下载，30 天内可恢复，前台无权删除', async () => {
+  it('全局设备与维修目录返回关联资料，隔离门店并隐藏已删除的记录及其子记录', async () => {
+    const fitting = db
+      .prepare("SELECT id FROM fittings WHERE customer_id='demo-1' LIMIT 1")
+      .get() as any;
+    const created = await req('/customers/demo-1/repairs', 'POST', {
+      fittingId: fitting.id,
+      occurredDate: '2026-09-27',
+      receivedDate: '',
+      completedDate: '',
+      status: '维修中',
+      problem: '目录关联测试',
+      findings: '',
+      workDone: '',
+      parts: '',
+      price: 50,
+      warrantyCovered: false,
+      notes: '',
+    });
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as any;
+    const devices = (await (await req('/devices')).json()) as any[];
+    expect(devices.find((row) => row.id === fitting.id)).toMatchObject({
+      customer_id: 'demo-1',
+      name: '陈淑华',
+      repair_count: 1,
+    });
+    const repairs = (await (await req('/repairs')).json()) as any[];
+    expect(repairs.find((row) => row.id === id)).toMatchObject({
+      customer_id: 'demo-1',
+      fitting_id: fitting.id,
+      device: { id: fitting.id },
+    });
+    const ownerCookie = cookie;
+    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
+      'directory-other-token',
+      '店主',
+      'other-store',
+      Date.now() + 10000,
+    );
+    cookie = 'hearing_session=directory-other-token';
+    expect(await (await req('/devices')).json()).toEqual([]);
+    expect(await (await req('/repairs')).json()).toEqual([]);
+    cookie = ownerCookie;
+    await req(`/customers/demo-1/repairs/${id}`, 'DELETE');
+    expect(await (await req('/repairs')).json()).toEqual([]);
+    expect(
+      ((await (await req('/devices')).json()) as any[]).find((row) => row.id === fitting.id)
+        .repair_count,
+    ).toBe(0);
+    await req(`/customers/demo-1/repairs/${id}/restore`, 'POST');
+    await req(`/customers/demo-1/fittings/${fitting.id}`, 'DELETE');
+    expect(await (await req('/repairs')).json()).toEqual([]);
+    expect(
+      ((await (await req('/devices')).json()) as any[]).some((row) => row.id === fitting.id),
+    ).toBe(false);
+    await req(`/customers/demo-1/fittings/${fitting.id}/restore`, 'POST');
+    await req('/customers/demo-1', 'DELETE');
+    expect(await (await req('/repairs')).json()).toEqual([]);
+    expect(
+      ((await (await req('/devices')).json()) as any[]).some((row) => row.customer_id === 'demo-1'),
+    ).toBe(false);
+  });
+  it('报告删除后无法下载，30 天内可恢复', async () => {
     const form = new FormData();
     form.append(
       'file',
@@ -169,11 +228,7 @@ describe('演示 API', () => {
       env,
     );
     const fileId = ((await uploaded.json()) as any).id;
-    const frontdesk = await req('/login', 'POST', { role: '前台' });
-    const ownerCookie = cookie;
-    cookie = frontdesk.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await req(`/customers/demo-1/attachments/${fileId}`, 'DELETE')).status).toBe(403);
-    cookie = ownerCookie;
+    expect((await req('/login', 'POST', { role: '前台' })).status).toBe(400);
     expect((await req(`/customers/demo-1/attachments/${fileId}`, 'DELETE')).status).toBe(200);
     expect((await req(`/files/${fileId}`)).status).toBe(404);
     const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
@@ -338,7 +393,7 @@ describe('演示 API', () => {
     expect(warranty.warranty).toBe('2026-11-30');
     expect(after.audit.some((row: any) => row.action === '修改听力检查记录')).toBe(true);
   });
-  it('随访可删除与恢复，前台不能删除客户或编辑专业检查', async () => {
+  it('随访可删除与恢复', async () => {
     const followupId = 'demo-1-follow';
     expect((await req(`/customers/demo-1/followups/${followupId}`, 'DELETE')).status).toBe(200);
     expect(
@@ -355,12 +410,7 @@ describe('演示 API', () => {
     expect(
       ((await (await req('/followups')).json()) as any[]).some((row) => row.id === followupId),
     ).toBe(true);
-    const login = await req('/login', 'POST', { role: '前台' });
-    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await req('/customers/demo-1', 'DELETE')).status).toBe(403);
-    expect((await req('/customers/removed')).status).toBe(403);
-    const exam = ((await (await req('/customers/demo-1/detail')).json()) as any).exams[0];
-    expect((await req(`/customers/demo-1/exams/${exam.id}`, 'PUT', exam)).status).toBe(403);
+    expect((await req('/login', 'POST', { role: '前台' })).status).toBe(400);
   });
   it('单页建档一次保存住址、独立联系人、听力图、验配和随访', async () => {
     const curve = () =>
@@ -427,9 +477,7 @@ describe('演示 API', () => {
       ),
     ).toBe(true);
   });
-  it('前台不能通过一站式建档绕过专业录入权限，错误不会留下半份档案', async () => {
-    const login = await req('/login', 'POST', { role: '前台' });
-    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
+  it('一站式建档验证失败不会留下半份档案', async () => {
     const before = db.prepare('SELECT COUNT(*) count FROM customers').get() as any;
     const base = {
       name: '权限测试',
@@ -470,9 +518,9 @@ describe('演示 API', () => {
           },
         })
       ).status,
-    ).toBe(403);
+    ).toBe(201);
     expect((db.prepare('SELECT COUNT(*) count FROM customers').get() as any).count).toBe(
-      before.count,
+      before.count + 1,
     );
     expect((await req('/intakes', 'POST', { customer: base })).status).toBe(201);
   });
@@ -716,12 +764,19 @@ describe('演示 API', () => {
     expect(saved.right[0].noResponse).toBe(true);
     expect(saved.left[1].masked).toBe(true);
   });
-  it('前台在服务端不能越权写入专业记录或导出', async () => {
-    const login = await req('/login', 'POST', { role: '前台' });
-    cookie = login.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await req('/customers/demo-1/exams', 'POST', {})).status).toBe(403);
-    expect((await req('/customers/demo-1/fittings', 'POST', {})).status).toBe(403);
-    expect((await req('/export')).status).toBe(403);
+  it('已取消的身份不能登录，旧会话也不能访问数据', async () => {
+    for (const role of ['前台', '验配师']) {
+      expect((await req('/login', 'POST', { role })).status).toBe(400);
+      db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
+        'legacy-' + encodeURIComponent(role),
+        role,
+        'demo-store',
+        Date.now() + 10000,
+      );
+      cookie = 'hearing_session=legacy-' + encodeURIComponent(role);
+      expect((await req('/customers')).status).toBe(401);
+      expect((await req('/export')).status).toBe(401);
+    }
   });
   it('其他门店不能读取、修改客户或完成随访', async () => {
     db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(

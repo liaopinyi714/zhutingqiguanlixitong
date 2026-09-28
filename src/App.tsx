@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity,
+  Wrench,
+  Menu,
+  Shield,
   ArrowDownToLine,
   ArrowLeft,
   ArrowRight,
@@ -15,8 +18,6 @@ import {
   FileText,
   Headphones,
   LayoutDashboard,
-  LogOut,
-  MoreHorizontal,
   Plus,
   Pencil,
   RotateCcw,
@@ -30,56 +31,16 @@ import {
 } from 'lucide-react';
 import { frequencies, pta } from '../server/domain';
 import { HearingEditor } from './HearingEditor';
+import { Field, FittingDeviceFields } from './Fields';
+import { RecordEditor } from './RecordEditor';
+import { Accounts, AccountMenu } from './Accounts';
+import { ServiceDirectory } from './ServiceDirectory';
+import { useWorkspaceRoute } from './useWorkspaceRoute';
+import { customerTabs, deviceName, deviceSerial } from './workspace';
 
-type Customer = {
-  id: string;
-  name: string;
-  gender: string;
-  birthDate: string;
-  phone: string;
-  contact: string;
-  contactPhone: string;
-  address: string;
-  source: string;
-  status: string;
-  history: string;
-  needs: string;
-  created_at: string;
-  deleted_at?: string;
-};
-type Point = { frequency: number; value: number | null; noResponse: boolean; masked: boolean };
-type Exam = {
-  id?: string;
-  date: string;
-  right: Point[];
-  left: Point[];
-  boneRight: Point[];
-  boneLeft: Point[];
-  uclRight?: Point[];
-  uclLeft?: Point[];
-  speech: string;
-  other: string;
-  conclusion: string;
-};
-type Follow = {
-  id: string;
-  customer_id: string;
-  name: string;
-  phone: string;
-  due: string;
-  type: string;
-  note: string;
-  completed: number;
-  result: string;
-};
-type Detail = {
-  exams: Exam[];
-  fittings: any[];
-  repairs: any[];
-  followups: Follow[];
-  attachments: any[];
-  audit: any[];
-};
+import type { Customer, Exam, Follow, Detail, Point } from './types';
+const blankCurve = () =>
+  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
 const statuses = ['全部客户', '待评估', '试戴中', '已验配', '长期随访'];
 const today = () => new Date().toLocaleDateString('sv-SE');
 const age = (date: string) => {
@@ -151,104 +112,6 @@ function Empty({ text = '还没有记录', action }: { text?: string; action?: R
     </div>
   );
 }
-function Field({
-  label,
-  children,
-  wide = false,
-}: {
-  label: string;
-  children: ReactNode;
-  wide?: boolean;
-}) {
-  return (
-    <label className={wide ? 'field wide' : 'field'}>
-      <span>{label}</span>
-      {children}
-    </label>
-  );
-}
-function Modal({
-  title,
-  children,
-  onClose,
-  wide = false,
-}: {
-  title: string;
-  children: ReactNode;
-  onClose: () => void;
-  wide?: boolean;
-}) {
-  const modalRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const fn = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', fn);
-    return () => document.removeEventListener('keydown', fn);
-  }, [onClose]);
-  useEffect(() => {
-    const oldFocus = document.activeElement as HTMLElement | null;
-    const oldOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    const node = modalRef.current!;
-    const elements = () =>
-      Array.from(
-        node.querySelectorAll<HTMLElement>(
-          'button:not([disabled]),input:not([disabled]),select,textarea,a[href]',
-        ),
-      );
-    elements()
-      .find((e) => e.tagName === 'INPUT')
-      ?.focus();
-    const trap = (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
-      const all = elements(),
-        first = all[0],
-        last = all[all.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
-    };
-    node.addEventListener('keydown', trap);
-    return () => {
-      document.body.style.overflow = oldOverflow;
-      node.removeEventListener('keydown', trap);
-      oldFocus?.focus();
-    };
-  }, []);
-  return (
-    <div
-      className="modal-backdrop"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <section
-        ref={modalRef}
-        className={'modal ' + (wide ? 'large' : '')}
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-      >
-        <header>
-          <div>
-            <small>聆序 · 客户服务</small>
-            <h2>{title}</h2>
-          </div>
-          <button className="icon-button" aria-label="关闭弹窗" onClick={onClose}>
-            <X />
-          </button>
-        </header>
-        {children}
-      </section>
-    </div>
-  );
-}
-
 function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
   const width = 550,
     height = 570,
@@ -399,86 +262,13 @@ function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
   );
 }
 
-function deviceSerial(value: any) {
-  return (
-    [
-      value?.serialLeft && '左耳：' + value.serialLeft,
-      value?.serialRight && '右耳：' + value.serialRight,
-    ]
-      .filter(Boolean)
-      .join('；') ||
-    value?.serial ||
-    '未填写'
-  );
-}
-function FittingDeviceFields({
-  value,
-  onChange,
-}: {
-  value: any;
-  onChange: (key: string, value: string) => void;
-}) {
-  return (
-    <>
-      <Field label="品牌">
-        <input
-          maxLength={50}
-          value={value.brand || ''}
-          onChange={(e) => onChange('brand', e.target.value)}
-          placeholder="直接填写品牌（选填）"
-        />
-      </Field>
-      <Field label="系列">
-        <input
-          maxLength={80}
-          value={value.series || ''}
-          onChange={(e) => onChange('series', e.target.value)}
-          placeholder="选填"
-        />
-      </Field>
-      <Field label="助听器型号" wide>
-        <input
-          maxLength={80}
-          value={value.model || ''}
-          onChange={(e) => onChange('model', e.target.value)}
-          placeholder="直接填写型号；左右耳型号不同时请分别建立验配记录"
-        />
-      </Field>
-      {value.side !== '右耳' && (
-        <Field label="左耳助听器序列号（SN）">
-          <input
-            maxLength={100}
-            value={value.serialLeft || ''}
-            onChange={(e) => onChange('serialLeft', e.target.value)}
-            placeholder="填写机身或包装上的唯一序列号"
-          />
-        </Field>
-      )}
-      {value.side !== '左耳' && (
-        <Field label="右耳助听器序列号（SN）">
-          <input
-            maxLength={100}
-            value={value.serialRight || ''}
-            onChange={(e) => onChange('serialRight', e.target.value)}
-            placeholder="填写机身或包装上的唯一序列号"
-          />
-        </Field>
-      )}
-      {value.id && value.serial && !value.serialLeft && !value.serialRight && (
-        <p className="muted wide">原序列号：{value.serial}。请核对后分别填写左右耳序列号。</p>
-      )}
-    </>
-  );
-}
-
-const blankCurve = () =>
-  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
-
 function IntakePage({
   role,
   onSave,
   onCancel,
+  onDirty,
 }: {
+  onDirty: (dirty: boolean) => void;
   role: string;
   onSave: (payload: { customer: any; exam?: Exam; fitting?: any; followup?: any }) => Promise<void>;
   onCancel: () => void;
@@ -524,6 +314,20 @@ function IntakePage({
   const [followup, setFollowup] = useState({ due: today(), type: '适应回访', note: '' });
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const snapshot = JSON.stringify({
+    profile,
+    exam,
+    fitting,
+    followup,
+    examEnabled,
+    fittingEnabled,
+    followupEnabled,
+  });
+  const initialIntake = useRef(snapshot);
+  useEffect(() => {
+    onDirty(snapshot !== initialIntake.current);
+  }, [snapshot]);
+  useEffect(() => () => onDirty(false), []);
   async function submitIntake(event: FormEvent) {
     event.preventDefault();
     setSaving(true);
@@ -667,7 +471,7 @@ function IntakePage({
             </Field>
           </div>
         </section>
-        {role !== '前台' && (
+        {role === '店主' && (
           <section className="panel padded intake-section">
             <div className="section-title">
               <div>
@@ -690,7 +494,7 @@ function IntakePage({
             )}
           </section>
         )}
-        {role !== '前台' && (
+        {role === '店主' && (
           <section className="panel padded intake-section">
             <div className="section-title">
               <div>
@@ -823,13 +627,13 @@ function IntakePage({
 export default function App() {
   const [role, setRole] = useState(''),
     [boot, setBoot] = useState(true),
-    [page, setPage] = useState('overview'),
     [customers, setCustomers] = useState<Customer[]>([]),
     [removedCustomers, setRemovedCustomers] = useState<Customer[]>([]),
-    [showRemovedCustomers, setShowRemovedCustomers] = useState(false),
-    [warranties, setWarranties] = useState<any[]>([]),
+    [devices, setDevices] = useState<any[]>([]),
+    [repairs, setRepairs] = useState<any[]>([]),
+    [mobileMenu, setMobileMenu] = useState(false),
+    [originPage, setOriginPage] = useState('customers'),
     [followups, setFollowups] = useState<Follow[]>([]),
-    [selected, setSelected] = useState<string | null>(null),
     [detail, setDetail] = useState<Detail | null>(null),
     [removed, setRemoved] = useState<{
       exams: any[];
@@ -846,7 +650,6 @@ export default function App() {
     }),
     [editingField, setEditingField] = useState(''),
     [editingValue, setEditingValue] = useState(''),
-    [tab, setTab] = useState('概览'),
     [search, setSearch] = useState(''),
     [searchOpen, setSearchOpen] = useState(false),
     [searchPosition, setSearchPosition] = useState({
@@ -861,7 +664,7 @@ export default function App() {
     [searchError, setSearchError] = useState(''),
     [searchActive, setSearchActive] = useState(0),
     [filter, setFilter] = useState('全部客户'),
-    [modal, setModal] = useState(''),
+    [editorKind, setEditorKind] = useState(''),
     [toast, setToast] = useState(''),
     [error, setError] = useState(''),
     [busy, setBusy] = useState(false),
@@ -870,7 +673,7 @@ export default function App() {
     [examEditorVersion, setExamEditorVersion] = useState(0),
     [compare, setCompare] = useState(false),
     [taskFilter, setTaskFilter] = useState('待完成'),
-    [loginRole, setLoginRole] = useState('店主'),
+    [accountAnchor, setAccountAnchor] = useState<HTMLElement | null>(null),
     [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
       try {
         return window.localStorage.getItem('hearing-sidebar-collapsed') === 'true';
@@ -880,6 +683,49 @@ export default function App() {
     }),
     [sidebarHover, setSidebarHover] = useState(false),
     [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力' });
+
+  const intakeDirty = useRef(false);
+  const accountDirty = useRef(false);
+  const accountBusy = useRef(false);
+  const draftSnapshot = useRef('');
+  const { route, update: updateRoute } = useWorkspaceRoute(() => {
+    if (!canLeaveEditor()) return false;
+    setEditorKind('');
+    setEditingField('');
+    setSearchOpen(false);
+    return true;
+  });
+  const { page, customer: selected, tab, record: focusedRecord, device: repairDevice } = route;
+  const setPage = (page: string) => updateRoute({ page });
+  const setSelected = (customer: string | null) => updateRoute({ customer });
+  const setTab = (tab: string) => updateRoute({ tab, record: '', device: '' });
+  function canLeaveEditor() {
+    if (busy || accountBusy.current) return false;
+    const dirty =
+      intakeDirty.current ||
+      accountDirty.current ||
+      editorKind === 'exam' ||
+      (editorKind && draftSnapshot.current !== JSON.stringify(draft)) ||
+      (editingField && editingValue !== String(customer?.[editingField as keyof Customer] || ''));
+    return !dirty || window.confirm('有尚未保存的更改，确定放弃？');
+  }
+  useEffect(() => {
+    draftSnapshot.current = JSON.stringify(draft);
+  }, [editorKind, draft.id]);
+  useEffect(() => {
+    if (!detail || !focusedRecord) return;
+    const timer = window.setTimeout(() => {
+      const node = document.getElementById('record-' + focusedRecord);
+      node?.scrollIntoView({
+        block: 'center',
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+          ? 'instant'
+          : 'smooth',
+      });
+      node?.focus({ preventScroll: true });
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [detail, focusedRecord, tab]);
   useEffect(() => {
     try {
       window.localStorage.setItem('hearing-sidebar-collapsed', String(sidebarCollapsed));
@@ -896,14 +742,21 @@ export default function App() {
   }
   useEffect(() => () => clearTimeout(sidebarTimer.current), []);
   useEffect(() => {
-    if (modal !== 'exam') return;
     const warn = (event: BeforeUnloadEvent) => {
+      if (
+        !editorKind &&
+        !editingField &&
+        !accountDirty.current &&
+        !accountBusy.current &&
+        !intakeDirty.current
+      )
+        return;
       event.preventDefault();
       event.returnValue = '';
     };
     window.addEventListener('beforeunload', warn);
     return () => window.removeEventListener('beforeunload', warn);
-  }, [modal]);
+  }, [editorKind, editingField]);
   function positionSearch(trigger: HTMLButtonElement) {
     const rect = trigger.getBoundingClientRect();
     const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
@@ -932,7 +785,7 @@ export default function App() {
     overdue = pending.filter((f) => f.due < today()),
     todayTasks = pending.filter((f) => f.due === today()),
     fitted = customers.filter((c) => ['已验配', '长期随访'].includes(c.status)),
-    warrantyAlerts = warranties
+    warrantyAlerts = devices
       .filter((item) => item.warranty && daysUntil(item.warranty) <= 90)
       .sort((a, b) => a.warranty.localeCompare(b.warranty));
   const flash = (msg: string) => {
@@ -940,15 +793,17 @@ export default function App() {
     setTimeout(() => setToast(''), 3500);
   };
   async function refresh(includeRemoved = role === '店主') {
-    const [a, b, warrantyRows, removedRows] = await Promise.all([
+    const [a, b, warrantyRows, removedRows, repairRows] = await Promise.all([
       api('/customers'),
       api('/followups'),
-      api('/warranties'),
+      api('/devices'),
       includeRemoved ? api('/customers/removed') : Promise.resolve([]),
+      api('/repairs'),
     ]);
     setCustomers(a);
     setFollowups(b);
-    setWarranties(warrantyRows);
+    setDevices(warrantyRows);
+    setRepairs(repairRows);
     setRemovedCustomers(removedRows);
   }
   async function loadDetail(key: string) {
@@ -982,7 +837,7 @@ export default function App() {
   }, []);
   useEffect(() => {
     let cancelled = false;
-    if (selected) {
+    if (selected && role) {
       setDetail(null);
       Promise.all([api(`/customers/${selected}/detail`), api(`/customers/${selected}/removed`)])
         .then(([data, removedRows]) => {
@@ -999,7 +854,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, role]);
   useEffect(() => {
     if (!role || !searchOpen || !globalQuery.trim()) {
       setGlobalResults([]);
@@ -1076,32 +931,39 @@ export default function App() {
     window.scrollTo(0, 0);
   }, [page, selected]);
   function navigate(next: string) {
-    if (modal === 'exam' && !window.confirm('听力图尚未保存，确定放弃本次更改？')) return;
-    setModal('');
+    if (!canLeaveEditor()) return;
+    setEditorKind('');
+    setEditingField('');
     setSearchOpen(false);
-    setPage(next);
-    setSelected(null);
+    setMobileMenu(false);
+    setAccountAnchor(null);
+    updateRoute({ page: next, customer: null, tab: '概览', record: '', device: '' });
+    setFilter('全部客户');
+    setTaskFilter('待完成');
     setSearch('');
     setError('');
   }
-  function openCustomer(key: string) {
-    if (modal === 'exam' && !window.confirm('听力图尚未保存，确定放弃本次更改？')) return;
-    setModal('');
+  function openCustomer(key: string, nextTab = '概览', record = '', device = '') {
+    if (!canLeaveEditor()) return;
+    if (page !== 'customers') setOriginPage(page);
+    setEditorKind('');
     setSearchOpen(false);
-    setSelected(key);
-    setTab('概览');
-    setPage('customers');
-    setError('');
+    setMobileMenu(false);
     setEditingField('');
+    updateRoute({ page: 'customers', customer: key, tab: nextTab, record, device });
+    setError('');
   }
-  function closeModal() {
+  function closeEditor() {
     if (!busy) {
-      if (modal === 'exam') setExamEditorVersion((version) => version + 1);
-      setModal('');
+      if (!canLeaveEditor()) return;
+      if (editorKind === 'exam') setExamEditorVersion((version) => version + 1);
+      setEditorKind('');
       setError('');
     }
   }
   function openForm(kind: string, record?: any) {
+    if (busy || !canLeaveEditor()) return;
+    setEditingField('');
     if (kind === 'customer' && !record) {
       navigate('intake');
       return;
@@ -1196,11 +1058,19 @@ export default function App() {
             },
       );
     if (kind === 'complete') setDraft({ ...record, result: '' });
+    const editorTabs: Record<string, string> = {
+      customer: '概览',
+      fitting: '验配记录',
+      repair: '维修记录',
+      followup: '随访记录',
+      complete: '随访记录',
+    };
+    if (customer && editorTabs[kind]) setTab(editorTabs[kind]);
     if (kind === 'exam') {
       setPage('customers');
       setTab('听力检查');
     }
-    setModal(kind);
+    setEditorKind(kind);
   }
   function change(key: string, value: any) {
     setDraft((d: any) => ({ ...d, [key]: value }));
@@ -1212,6 +1082,7 @@ export default function App() {
     followup?: any;
   }) {
     const created = await api('/intakes', 'POST', payload);
+    intakeDirty.current = false;
     await refresh();
     openCustomer(created.id);
     flash('客户档案及所选服务记录已保存');
@@ -1223,7 +1094,7 @@ export default function App() {
     customerId = selected,
   ) {
     if (!customerId) return;
-    if (!restore && !window.confirm('确认删除这条记录？删除后可在本页恢复，30 天后自动彻底清除。'))
+    if (!restore && !window.confirm('确认删除这条记录？30 天内可在客户档案内恢复，之后自动清除。'))
       return;
     setBusy(true);
     setError('');
@@ -1309,7 +1180,7 @@ export default function App() {
     try {
       let key = selected;
       let latestDetail: Detail | null = null;
-      if (modal === 'customer') {
+      if (editorKind === 'customer') {
         const r = await api(
           draft.id ? `/customers/${draft.id}/profile` : '/customers',
           draft.id ? 'PUT' : 'POST',
@@ -1317,13 +1188,13 @@ export default function App() {
         );
         key = draft.id || r.id;
       }
-      if (modal === 'exam')
+      if (editorKind === 'exam')
         await api(
           `/customers/${selected}/exams${draft.id ? '/' + draft.id : ''}`,
           draft.id ? 'PUT' : 'POST',
           draft,
         );
-      if (modal === 'fitting')
+      if (editorKind === 'fitting')
         await api(
           `/customers/${selected}/fittings${draft.id ? '/' + draft.id : ''}`,
           draft.id ? 'PUT' : 'POST',
@@ -1332,19 +1203,19 @@ export default function App() {
             amount: Number(draft.amount),
           },
         );
-      if (modal === 'repair')
+      if (editorKind === 'repair')
         await api(
           `/customers/${selected}/repairs${draft.id ? '/' + draft.id : ''}`,
           draft.id ? 'PUT' : 'POST',
           { ...draft, price: Number(draft.price) },
         );
-      if (modal === 'followup')
+      if (editorKind === 'followup')
         await api(
           `/customers/${draft.customerId}/followups${draft.id ? '/' + draft.id : ''}`,
           draft.id ? 'PUT' : 'POST',
           draft,
         );
-      if (modal === 'complete')
+      if (editorKind === 'complete')
         await api(`/followups/${draft.id}`, 'PUT', { result: draft.result });
       await refresh();
       if (key) {
@@ -1352,7 +1223,7 @@ export default function App() {
         latestDetail = await api(`/customers/${key}/detail`);
         setDetail(latestDetail);
       }
-      if (modal === 'exam') {
+      if (editorKind === 'exam') {
         setExamEditorVersion((version) => version + 1);
         setTab('听力检查');
         setExamIndex(
@@ -1364,13 +1235,13 @@ export default function App() {
             : 0,
         );
       }
-      if (modal === 'fitting') setTab('验配记录');
-      if (modal === 'repair') setTab('维修记录');
-      if (modal === 'customer') {
+      if (editorKind === 'fitting') setTab('验配记录');
+      if (editorKind === 'repair') setTab('维修记录');
+      if (editorKind === 'customer') {
         setPage('customers');
         setTab('概览');
       }
-      setModal('');
+      setEditorKind('');
       flash('记录已保存');
     } catch (e) {
       setError((e as Error).message);
@@ -1436,47 +1307,19 @@ export default function App() {
               <small>HEARING CARE</small>
             </div>
           </div>
-          <span className="cf-login-header-note">助听器门店客户服务工作空间</span>
         </header>
         <main className="cf-login-main">
           <div className="cf-login-intro">
-            <span className="eyebrow">客户服务工作台</span>
             <h1>进入聆序工作台</h1>
-            <p>
-              {identity.demo
-                ? '选择演示角色，查看客户档案、听力检查、验配与随访记录。'
-                : '使用已获授权的员工邮箱登录，继续为客户提供服务。'}
-            </p>
+            <p>{identity.demo ? '使用店主账户体验客户管理。' : '使用已授权的邮箱登录。'}</p>
           </div>
           <section className="cf-login-card">
             <div className="cf-login-card-head">
               <span className="cf-login-pill">
-                <i /> {identity.demo ? '演示空间' : '员工工作空间'}
+                <i /> {identity.demo ? '演示登录' : '账户登录'}
               </span>
-              <span>{identity.demo ? '选择体验角色' : '验证员工身份'}</span>
+              <span>{identity.demo ? '店主账户' : '验证登录邮箱'}</span>
             </div>
-            {identity.demo && (
-              <div className="cf-role-options">
-                {['店主', '验配师', '前台'].map((r) => (
-                  <button
-                    key={r}
-                    className={loginRole === r ? 'selected' : ''}
-                    aria-pressed={loginRole === r}
-                    onClick={() => setLoginRole(r)}
-                  >
-                    <span>{r}</span>
-                    <small>
-                      {r === '店主'
-                        ? '全部档案、统计与导出'
-                        : r === '验配师'
-                          ? '听力检查、验配与随访'
-                          : '客户建档、预约与回访'}
-                    </small>
-                    {loginRole === r && <CheckCircle2 size={18} />}
-                  </button>
-                ))}
-              </div>
-            )}
             <button
               className="button primary full cf-login-submit"
               disabled={busy}
@@ -1488,10 +1331,10 @@ export default function App() {
                 setBusy(true);
                 setError('');
                 try {
-                  await api('/login', 'POST', { role: loginRole });
+                  await api('/login', 'POST', { role: '店主' });
                   setIdentity(await api('/me'));
-                  await refresh(loginRole === '店主');
-                  setRole(loginRole);
+                  await refresh(true);
+                  setRole('店主');
                 } catch (e) {
                   setError((e as Error).message);
                 } finally {
@@ -1511,18 +1354,34 @@ export default function App() {
             </p>
           </section>
         </main>
-        <footer className="cf-login-footer">
-          聆序 HEARING CARE <span>·</span> 让每一次服务，有迹可循。
-        </footer>
+        <footer className="cf-login-footer">聆序 · 助听器客户管理</footer>
       </div>
     );
   const navs = [
     ['overview', '工作台', LayoutDashboard],
     ['customers', '客户档案', Users],
-    ['followups', '随访与预约', CalendarDays],
+    ['devices', '验配设备', Headphones],
+    ['repairs', '设备维修', Wrench],
+    ['followups', '随访预约', CalendarDays],
+    ['warranties', '保修提醒', Shield],
     ['reports', '统计分析', Activity],
-    ['settings', '门店设置', Settings2],
+    ['recycle', '回收站', Trash2],
+    ['settings', '设置', Settings2],
   ] as const;
+  const editor =
+    editorKind && editorKind !== 'exam' ? (
+      <RecordEditor
+        kind={editorKind}
+        draft={draft}
+        customers={customers}
+        detail={detail}
+        error={error}
+        busy={busy}
+        change={change}
+        submit={submit}
+        closeEditor={closeEditor}
+      />
+    ) : null;
   const customerTable = (list: Customer[], compact = false) => (
     <div className="table-scroll">
       <table className="customer-table">
@@ -1583,48 +1442,64 @@ export default function App() {
     list.length ? (
       <div className="task-list">
         {list.map((f) => (
-          <div className="task-row" key={f.id}>
-            <div className={'task-icon ' + (f.completed ? 'done' : f.due < today() ? 'late' : '')}>
-              <CalendarDays size={18} />
-            </div>
-            <div className="task-body">
-              <button className="text-link" onClick={() => openCustomer(f.customer_id)}>
-                {f.name}
-              </button>
-              <span className="task-type">{f.type}</span>
-              <p>{f.completed ? f.result : f.note}</p>
-              <small className={f.due < today() && !f.completed ? 'danger' : 'muted'}>
-                {f.due}
-                {!f.completed && f.due < today() ? ' · 已逾期' : ''}
-                {f.completed ? ' · 已完成' : ''}
-              </small>
-            </div>
-            <div className="task-actions">
-              {f.completed ? (
-                <CheckCircle2 size={20} className="green" />
-              ) : (
-                <button className="button small" onClick={() => openForm('complete', f)}>
-                  记录结果
-                </button>
-              )}
-              <button
-                className="icon-action"
-                title="编辑随访"
-                aria-label={`编辑 ${f.name} 的随访`}
-                onClick={() => openForm('followup', f)}
-              >
-                <Pencil size={15} />
-              </button>
-              <button
-                className="icon-action danger-button"
-                title="删除随访"
-                aria-label={`删除 ${f.name} 的随访`}
-                disabled={busy}
-                onClick={() => changeRecord('followups', f.id, false, f.customer_id)}
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
+          <div
+            key={f.id}
+            id={'record-' + f.id}
+            tabIndex={-1}
+            className={'task-record' + (focusedRecord === f.id ? ' record-highlight' : '')}
+          >
+            {['followup', 'complete'].includes(editorKind) && draft.id === f.id ? (
+              editor
+            ) : (
+              <div className="task-row">
+                <div
+                  className={'task-icon ' + (f.completed ? 'done' : f.due < today() ? 'late' : '')}
+                >
+                  <CalendarDays size={18} />
+                </div>
+                <div className="task-body">
+                  <button className="text-link" onClick={() => openCustomer(f.customer_id)}>
+                    {f.name}
+                  </button>
+                  <span className="task-type">{f.type}</span>
+                  <button className="task-description" onClick={() => openForm('followup', f)}>
+                    {(f.completed ? f.result : f.note) || '添加随访内容'}
+                    <Pencil size={13} />
+                  </button>
+                  <small className={f.due < today() && !f.completed ? 'danger' : 'muted'}>
+                    {f.due}
+                    {!f.completed && f.due < today() ? ' · 已逾期' : ''}
+                    {f.completed ? ' · 已完成' : ''}
+                  </small>
+                </div>
+                <div className="task-actions">
+                  {f.completed ? (
+                    <CheckCircle2 size={20} className="green" />
+                  ) : (
+                    <button className="button small" onClick={() => openForm('complete', f)}>
+                      记录结果
+                    </button>
+                  )}
+                  <button
+                    className="icon-action"
+                    title="编辑随访"
+                    aria-label={`编辑 ${f.name} 的随访`}
+                    onClick={() => openForm('followup', f)}
+                  >
+                    <Pencil size={15} />
+                  </button>
+                  <button
+                    className="icon-action danger-button"
+                    title="删除随访"
+                    aria-label={`删除 ${f.name} 的随访`}
+                    disabled={busy}
+                    onClick={() => changeRecord('followups', f.id, false, f.customer_id)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -1649,6 +1524,7 @@ export default function App() {
             title={`编辑${label}`}
             aria-label={`编辑${label}`}
             onClick={() => {
+              if (!canLeaveEditor()) return;
               setEditingField(field);
               setEditingValue(value);
             }}
@@ -1698,7 +1574,17 @@ export default function App() {
               </button>
             </form>
           ) : (
-            value || '未填写'
+            <button
+              className="editable-value"
+              onClick={() => {
+                if (!canLeaveEditor()) return;
+                setEditingField(field);
+                setEditingValue(value);
+              }}
+            >
+              {value || '未填写'}
+              <Pencil size={13} />
+            </button>
           )}
         </dd>
       </div>
@@ -1730,7 +1616,7 @@ export default function App() {
             </span>
             <div>
               <b>聆序</b>
-              <small>HEARING CARE</small>
+              <small>{identity.storeName}</small>
             </div>
           </div>
           <button
@@ -1743,61 +1629,45 @@ export default function App() {
             <span>快速搜索客户...</span>
             <kbd>Ctrl K</kbd>
           </button>
-          <div className="store-switch">
-            <div className="store-mark">聆</div>
-            <div>
-              <strong>{identity.storeName}</strong>
-              <small>客户服务工作空间</small>
-            </div>
-          </div>
-          <span className="nav-caption">门店管理</span>
           <nav>
-            {navs.map(([key, label, Icon]) => (
-              <button
-                key={key}
-                title={label}
-                aria-label={label}
-                onClick={() => navigate(key)}
-                className={page === key ? 'active' : ''}
-              >
-                <Icon size={19} />
-                <span>{label}</span>
-                {key === 'followups' && pending.length > 0 && <b>{pending.length}</b>}
-              </button>
-            ))}
+            {navs
+              .filter(([key]) => key !== 'recycle' || role === '店主')
+              .map(([key, label, Icon]) => (
+                <button
+                  key={key}
+                  title={label}
+                  aria-label={label}
+                  onClick={() => navigate(key)}
+                  className={
+                    page === key ||
+                    (key === 'customers' && page === 'intake') ||
+                    (key === 'settings' && page === 'accounts')
+                      ? 'active'
+                      : ''
+                  }
+                >
+                  <Icon size={18} strokeWidth={1.5} />
+                  <span>{label}</span>
+                  {key === 'followups' && pending.length > 0 && <b>{pending.length}</b>}
+                </button>
+              ))}
           </nav>
           <div className="sidebar-bottom">
-            <div className="demo-box">
-              <span className="demo-dot" />
-              {identity.demo ? '演示空间' : '门店工作空间'}
-              <p>
-                {identity.demo ? '数据已保存至演示数据库' : '客户资料按门店独立管理'}
-                <br />
-                {identity.demo ? '请勿录入真实客户资料' : '已删除资料保留 30 天'}
-              </p>
-            </div>
             <button
               className="profile"
-              title={identity.demo ? '退出 / 切换角色' : '退出登录'}
-              onClick={async () => {
-                try {
-                  const result = await api('/logout', 'POST');
-                  if (result.logoutUrl) window.location.assign(result.logoutUrl);
-                  else {
-                    setRole('');
-                    setSelected(null);
-                  }
-                } catch (reason) {
-                  setError((reason as Error).message);
-                }
-              }}
+              title="我的账户"
+              aria-label="我的账户"
+              aria-expanded={!!accountAnchor}
+              onClick={(event) =>
+                setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
+              }
             >
-              <span className="profile-avatar">{role.slice(0, 1)}</span>
+              <span className="profile-avatar">{(identity.name || role).slice(0, 1)}</span>
               <div>
                 <strong>{identity.name || role}</strong>
-                <small>{identity.demo ? '退出 / 切换角色' : `${role} · 退出登录`}</small>
+                <small>店主</small>
               </div>
-              <LogOut size={17} />
+              <ChevronRight size={16} />
             </button>
           </div>
         </div>
@@ -1814,11 +1684,73 @@ export default function App() {
           <PanelLeft size={18} strokeWidth={1.4} />
         </button>
       </aside>
+      <nav className="mobile-navigation" aria-label="主要导航">
+        {navs
+          .filter(([key]) => ['overview', 'customers', 'followups', 'repairs'].includes(key))
+          .map(([key, label, Icon]) => (
+            <button
+              key={key}
+              className={page === key ? 'active' : ''}
+              onClick={() => navigate(key)}
+            >
+              <Icon size={20} strokeWidth={1.5} />
+              <span>{label}</span>
+            </button>
+          ))}
+        <button
+          className={mobileMenu ? 'active' : ''}
+          onClick={() => setMobileMenu((open) => !open)}
+          aria-expanded={mobileMenu}
+          aria-label="更多导航"
+        >
+          <Menu size={20} />
+          <span>更多</span>
+        </button>
+      </nav>
+      {mobileMenu && (
+        <div className="mobile-menu-backdrop" onClick={() => setMobileMenu(false)}>
+          <section
+            className="mobile-menu"
+            aria-label="更多功能"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <header>
+              <strong>更多功能</strong>
+              <button
+                className="icon-action"
+                aria-label="关闭导航"
+                onClick={() => setMobileMenu(false)}
+              >
+                <X size={19} />
+              </button>
+            </header>
+            {navs
+              .filter(
+                ([key]) =>
+                  !['overview', 'customers', 'followups', 'repairs'].includes(key) &&
+                  (key !== 'recycle' || role === '店主'),
+              )
+              .map(([key, label, Icon]) => (
+                <button key={key} onClick={() => navigate(key)}>
+                  <Icon size={19} />
+                  {label}
+                  <ChevronRight size={16} />
+                </button>
+              ))}
+          </section>
+        </div>
+      )}
       <main className="main">
         <header className="topbar">
           <div className="breadcrumb">
-            门店管理 <ChevronRight size={14} />{' '}
-            <strong>{page === 'intake' ? '新建客户' : navs.find((n) => n[0] === page)?.[1]}</strong>
+            <button onClick={() => navigate('overview')}>聆序</button> <ChevronRight size={14} />{' '}
+            <button onClick={() => navigate(page)}>
+              {page === 'accounts'
+                ? '账户管理'
+                : page === 'intake'
+                  ? '新建客户'
+                  : navs.find((n) => n[0] === page)?.[1]}
+            </button>
             {customer && (
               <>
                 <ChevronRight size={14} />
@@ -1834,10 +1766,7 @@ export default function App() {
             >
               <Search size={19} />
             </button>
-            <span>
-              <i className="live-dot" />
-              {identity.demo ? '演示版' : '门店版'}
-            </span>
+            {identity.demo && <span className="demo-pill">演示版</span>}
             <button
               className="icon-button"
               aria-label="查看待办"
@@ -1846,11 +1775,20 @@ export default function App() {
               <Bell size={19} />
               {todayTasks.length > 0 && <i className="notification-dot" />}
             </button>
-            <span className="top-avatar">{role.slice(0, 1)}</span>
+            <button
+              className="top-avatar"
+              aria-label="我的账户"
+              aria-expanded={!!accountAnchor}
+              onClick={(event) =>
+                setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
+              }
+            >
+              {(identity.name || role).slice(0, 1)}
+            </button>
           </div>
         </header>
         <div className="content">
-          {error && !modal && (
+          {error && !editorKind && (
             <div className="error dismiss">
               {error}
               <button onClick={() => setError('')}>
@@ -1858,15 +1796,90 @@ export default function App() {
               </button>
             </div>
           )}
+          {page === 'accounts' && (
+            <Accounts
+              api={api}
+              identity={identity}
+              updated={async () => setIdentity(await api('/me'))}
+              dirty={(value) => {
+                accountDirty.current = value;
+              }}
+              saving={(value) => {
+                accountBusy.current = value;
+              }}
+            />
+          )}
+          {page === 'recycle' && (
+            <>
+              <div className="page-heading">
+                <h1>回收站</h1>
+              </div>{' '}
+              {role === '店主' && (
+                <section className="panel padded space-top">
+                  <div className="section-title">
+                    <h2>已删除档案</h2>
+                  </div>
+                  <p className="muted retention-note">
+                    删除后保留 30 天；到期自动彻底清除，之后无法恢复。
+                  </p>
+                  {removedCustomers.length ? (
+                    <div className="removed-customer-list">
+                      {removedCustomers.map((item) => (
+                        <div key={item.id}>
+                          <span>
+                            <strong>{item.name}</strong>
+                            <small>
+                              {item.phone || '未填写电话'} · 可恢复至{' '}
+                              {restoreDeadline(item.deleted_at || '')}
+                            </small>
+                          </span>
+                          <button
+                            className="button small"
+                            disabled={busy}
+                            onClick={() => changeCustomer(item.id, true)}
+                          >
+                            <RotateCcw size={14} /> 恢复档案
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">没有已删除的客户档案</p>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+          {(['devices', 'repairs', 'warranties'] as string[]).includes(page) && (
+            <ServiceDirectory
+              key={page}
+              kind={page as 'devices' | 'repairs' | 'warranties'}
+              devices={devices}
+              repairs={repairs}
+              customers={customers}
+              canEdit={role === '店主'}
+              open={openCustomer}
+              create={(kind, customerId, deviceId) => {
+                openCustomer(customerId, kind === 'repair' ? '维修记录' : '验配记录');
+                openForm(kind, deviceId ? { fittingId: deviceId } : undefined);
+              }}
+            />
+          )}
           {page === 'intake' && (
-            <IntakePage role={role} onSave={saveIntake} onCancel={() => navigate('customers')} />
+            <IntakePage
+              onDirty={(value) => {
+                intakeDirty.current = value;
+              }}
+              role={role}
+              onSave={saveIntake}
+              onCancel={() => navigate('customers')}
+            />
           )}
           {page === 'overview' && (
             <>
               <div className="page-heading">
                 <div>
-                  <span className="eyebrow">客户服务工作台</span>
-                  <h1>今天要查找哪位客户？</h1>
+                  <h1>查找客户，开始服务</h1>
                   <p>
                     {new Date().toLocaleDateString('zh-CN', {
                       year: 'numeric',
@@ -1880,7 +1893,7 @@ export default function App() {
               </div>
               <button className="home-search" onClick={(event) => openSearch(event.currentTarget)}>
                 <Search size={22} />
-                <span>搜索客户姓名、电话、检查结果、设备或随访记录...</span>
+                <span>搜索姓名、电话、型号、序列号或服务记录</span>
                 <kbd>Ctrl</kbd>
                 <kbd>K</kbd>
               </button>
@@ -1888,7 +1901,6 @@ export default function App() {
                 <section>
                   <header>
                     <span>客户档案</span>
-                    <MoreHorizontal size={18} />
                   </header>
                   <button onClick={() => openForm('customer')}>
                     <Plus size={17} />
@@ -1899,7 +1911,6 @@ export default function App() {
                 <section>
                   <header>
                     <span>快捷操作</span>
-                    <MoreHorizontal size={18} />
                   </header>
                   <button onClick={() => navigate('customers')}>
                     <Users size={17} />
@@ -1910,7 +1921,6 @@ export default function App() {
                 <section>
                   <header>
                     <span>最近建档</span>
-                    <MoreHorizontal size={18} />
                   </header>
                   {customers.slice(0, 3).map((recent) => (
                     <button key={recent.id} onClick={() => openCustomer(recent.id)}>
@@ -1923,36 +1933,45 @@ export default function App() {
                 </section>
               </div>
               <div className="home-section-label">
-                <h2>门店概况</h2>
-                <span>客户与服务实时统计</span>
+                <h2>工作概况</h2>
               </div>
               <div className="stats-grid">
                 <Stat
+                  onClick={() => navigate('customers')}
                   label="客户总数"
                   value={customers.length}
                   unit="位"
-                  detail="已建立服务档案"
+                  detail=""
                   icon={<Users />}
                 />
                 <Stat
+                  onClick={() => navigate('devices')}
                   label="已验配客户"
                   value={fitted.length}
                   unit="位"
-                  detail="包含长期随访客户"
+                  detail=""
                   icon={<Headphones />}
                 />
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('今日');
+                  }}
                   label="今日待办"
                   value={todayTasks.length}
                   unit="项"
-                  detail="回访、复查与到店服务"
+                  detail=""
                   icon={<CalendarDays />}
                 />
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('已逾期');
+                  }}
                   label="逾期未跟进"
                   value={overdue.length}
                   unit="项"
-                  detail="建议优先安排联系"
+                  detail=""
                   icon={<Bell />}
                   warning
                 />
@@ -1964,7 +1983,6 @@ export default function App() {
                       <h2>
                         服务待办 <span className="count">{pending.length}</span>
                       </h2>
-                      <p>记录每一次反馈，跟进每一次变化</p>
                     </div>
                     <button className="text-link muted" onClick={() => navigate('followups')}>
                       查看全部 <ArrowRight size={15} />
@@ -1974,8 +1992,7 @@ export default function App() {
                 </section>
                 <div className="dashboard-side">
                   <section className="panel journey-panel">
-                    <span className="eyebrow">客户服务进程</span>
-                    <h2>从初次相识，到长期关怀</h2>
+                    <h2>服务阶段</h2>
                     <div className="journey-bars">
                       {statuses.slice(1).map((s, i) => {
                         const count = customers.filter((c) => c.status === s).length;
@@ -1990,7 +2007,7 @@ export default function App() {
                             <span>
                               <i
                                 style={{
-                                  background: ['#d5b777', '#79a59c', '#5c8c80', '#245d50'][i],
+                                  background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
                                 }}
                               />
                               {s}
@@ -2003,7 +2020,7 @@ export default function App() {
                               <i
                                 style={{
                                   width: (100 * count) / Math.max(customers.length, 1) + '%',
-                                  background: ['#d5b777', '#79a59c', '#5c8c80', '#245d50'][i],
+                                  background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
                                 }}
                               />
                             </div>
@@ -2012,24 +2029,12 @@ export default function App() {
                       })}
                     </div>
                   </section>
-                  <div className="care-note">
-                    <div>
-                      <Ear size={23} />
-                      <span>好服务，始于认真倾听</span>
-                    </div>
-                    <p>
-                      将客户的真实感受写进回访记录，
-                      <br />
-                      让下一次服务更有依据。
-                    </p>
-                  </div>
                 </div>
               </div>
               <section className="panel recent-panel">
                 <div className="panel-heading">
                   <div>
                     <h2>最近建档</h2>
-                    <p>及时了解新客户的聆听需求</p>
                   </div>
                   <button className="text-link muted" onClick={() => navigate('customers')}>
                     全部客户 <ArrowRight size={15} />
@@ -2043,9 +2048,7 @@ export default function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <span className="eyebrow">客户服务档案</span>
                   <h1>客户档案</h1>
-                  <p>汇集检查、验配与随访，了解客户的每一步。</p>
                 </div>
                 <button className="button primary" onClick={() => openForm('customer')}>
                   <Plus size={18} />
@@ -2084,54 +2087,13 @@ export default function App() {
                   共 {filtered.length} 位客户 <span>点击客户查看完整服务档案</span>
                 </div>
               </section>
-              {role === '店主' && (
-                <section className="panel padded space-top">
-                  <div className="section-title">
-                    <h2>已删除档案</h2>
-                    <button
-                      className="button small"
-                      onClick={() => setShowRemovedCustomers(!showRemovedCustomers)}
-                    >
-                      {showRemovedCustomers ? '收起' : `查看 ${removedCustomers.length} 位`}
-                    </button>
-                  </div>
-                  <p className="muted retention-note">
-                    删除后保留 30 天；到期自动彻底清除，之后无法恢复。
-                  </p>
-                  {showRemovedCustomers &&
-                    (removedCustomers.length ? (
-                      <div className="removed-customer-list">
-                        {removedCustomers.map((item) => (
-                          <div key={item.id}>
-                            <span>
-                              <strong>{item.name}</strong>
-                              <small>
-                                {item.phone || '未填写电话'} · 可恢复至{' '}
-                                {restoreDeadline(item.deleted_at || '')}
-                              </small>
-                            </span>
-                            <button
-                              className="button small"
-                              disabled={busy}
-                              onClick={() => changeCustomer(item.id, true)}
-                            >
-                              <RotateCcw size={14} /> 恢复档案
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="muted">没有已删除的客户档案</p>
-                    ))}
-                </section>
-              )}
             </>
           )}
           {page === 'customers' && customer && (
             <>
-              <button className="back" onClick={() => navigate('customers')}>
+              <button className="back" onClick={() => navigate(originPage)}>
                 <ArrowLeft size={16} />
-                返回客户列表
+                返回{navs.find((n) => n[0] === originPage)?.[1] || '客户档案'}
               </button>
               <section className="customer-hero">
                 <div className="person">
@@ -2178,20 +2140,33 @@ export default function App() {
                 </div>
               </section>
               <div className="detail-tabs">
-                {['概览', '听力检查', '验配记录', '维修记录', '随访记录', '报告附件'].map((t) => (
+                {customerTabs.map((t) => (
                   <button
                     key={t}
                     className={tab === t ? 'active' : ''}
                     onClick={() => {
-                      if (modal === 'exam' && t !== tab) {
-                        if (!window.confirm('听力图尚未保存，确定放弃本次更改？')) return;
-                        setModal('');
-                      }
+                      if (!canLeaveEditor()) return;
+                      setEditorKind('');
+                      setEditingField('');
                       setTab(t);
                     }}
                   >
                     {t}
-                    {t === '听力检查' && detail && <span>{detail.exams.length}</span>}
+                    {detail && t !== '概览' && (
+                      <span>
+                        {
+                          (
+                            {
+                              听力检查: detail.exams.length,
+                              验配记录: detail.fittings.length,
+                              维修记录: detail.repairs.length,
+                              随访记录: detail.followups.length,
+                              报告附件: detail.attachments.length,
+                            } as Record<string, number>
+                          )[t]
+                        }
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
@@ -2199,7 +2174,8 @@ export default function App() {
                 <div className="loading-inline">正在读取档案…</div>
               ) : (
                 <>
-                  {tab === '概览' && (
+                  {tab === '概览' && editorKind === 'customer' && editor}
+                  {tab === '概览' && editorKind !== 'customer' && (
                     <div className="detail-grid">
                       <div>
                         <section className="panel padded">
@@ -2257,7 +2233,7 @@ export default function App() {
                             <Empty
                               text="尚未录入听力检查"
                               action={
-                                role !== '前台' && (
+                                role === '店主' && (
                                   <button className="button" onClick={() => openForm('exam')}>
                                     录入检查
                                   </button>
@@ -2270,39 +2246,49 @@ export default function App() {
                       <div>
                         <section className="panel padded">
                           <div className="section-title">
-                            <h2>当前佩戴设备</h2>
+                            <h2>验配设备</h2>
                             <Headphones size={18} />
                           </div>
-                          {detail.fittings[0] ? (
-                            <>
-                              <div className="device-card">
-                                <div className="device-icon">
-                                  <Headphones size={33} />
-                                </div>
-                                <small>
-                                  {[detail.fittings[0].brand, detail.fittings[0].series]
-                                    .filter(Boolean)
-                                    .join(' · ')}
-                                </small>
-                                <h3>{detail.fittings[0].model}</h3>
-                                <span>{detail.fittings[0].side}佩戴</span>
-                              </div>
-                              <dl className="stacked-info">
-                                <div>
-                                  <dt>验配日期</dt>
-                                  <dd>{detail.fittings[0].date}</dd>
-                                </div>
-                                <div>
-                                  <dt>保修截止</dt>
-                                  <dd>{detail.fittings[0].warranty || '未填写'}</dd>
-                                </div>
-                              </dl>
-                              <button className="button full" onClick={() => setTab('验配记录')}>
-                                查看验配记录
+                          {detail.fittings.length ? (
+                            detail.fittings.map((f) => (
+                              <button
+                                className="device-summary-link"
+                                key={f.id}
+                                onClick={() => openCustomer(customer.id, '验配记录', f.id)}
+                              >
+                                <Headphones size={18} />
+                                <span>
+                                  <strong>{deviceName(f)}</strong>
+                                  <small>
+                                    {f.side} · {f.date}
+                                  </small>
+                                  <small>{deviceSerial(f)}</small>
+                                </span>
+                                <ChevronRight size={16} />
                               </button>
-                            </>
+                            ))
                           ) : (
-                            <Empty text="暂无验配设备记录" />
+                            <Empty
+                              text="暂无验配设备"
+                              action={
+                                role === '店主' && (
+                                  <button className="button" onClick={() => openForm('fitting')}>
+                                    <Plus size={15} />
+                                    新增验配
+                                  </button>
+                                )
+                              }
+                            />
+                          )}
+                          {detail.repairs.length > 0 && (
+                            <button
+                              className="button full"
+                              onClick={() => openCustomer(customer.id, '维修记录')}
+                            >
+                              <Wrench size={15} />
+                              查看维修记录 · {detail.repairs.length}
+                              <ArrowRight size={15} />
+                            </button>
                           )}
                         </section>
                         <section className="panel padded space-top">
@@ -2327,12 +2313,11 @@ export default function App() {
                       <div className="section-title">
                         <div>
                           <h2>听力检查</h2>
-                          <p className="muted">直接在图上标记或修改，完成后保存本次检查。</p>
                         </div>
-                        {role !== '前台' && (
+                        {role === '店主' && (
                           <button
                             className="button"
-                            disabled={busy || modal === 'exam'}
+                            disabled={busy || editorKind === 'exam'}
                             onClick={() => openForm('exam')}
                           >
                             <Plus size={16} />
@@ -2340,10 +2325,12 @@ export default function App() {
                           </button>
                         )}
                       </div>
-                      {modal === 'exam' || detail.exams.length > 0 ? (
+                      {editorKind === 'exam' || detail.exams.length > 0 ? (
                         (() => {
                           const ex: Exam =
-                            modal === 'exam' ? draft : detail.exams[examIndex] || detail.exams[0];
+                            editorKind === 'exam'
+                              ? draft
+                              : detail.exams[examIndex] || detail.exams[0];
                           const savedIndex = detail.exams.findIndex((item) => item.id === ex.id);
                           return (
                             <>
@@ -2352,7 +2339,7 @@ export default function App() {
                                   <select
                                     aria-label="选择历史检查"
                                     value={examIndex}
-                                    disabled={modal === 'exam'}
+                                    disabled={editorKind === 'exam'}
                                     onChange={(e) => setExamIndex(Number(e.target.value))}
                                   >
                                     {detail.exams.map((row, i) => (
@@ -2375,10 +2362,10 @@ export default function App() {
                                 <button className="button small" onClick={() => window.print()}>
                                   打印 / PDF
                                 </button>
-                                {role !== '前台' && ex.id && (
+                                {role === '店主' && ex.id && (
                                   <button
                                     className="button small danger-button"
-                                    disabled={busy || modal === 'exam'}
+                                    disabled={busy || editorKind === 'exam'}
                                     onClick={() => changeRecord('exams', ex.id!)}
                                   >
                                     删除本次检查
@@ -2395,22 +2382,22 @@ export default function App() {
                                       : undefined
                                   }
                                   onChange={
-                                    role === '前台' || busy
+                                    role !== '店主' || busy
                                       ? undefined
                                       : (next) => {
                                           setDraft(next);
-                                          setModal('exam');
+                                          setEditorKind('exam');
                                         }
                                   }
                                 />
-                                {modal === 'exam' && (
+                                {editorKind === 'exam' && (
                                   <div className="hearing-save">
                                     <span>本次更改尚未保存</span>
                                     <button
                                       type="button"
                                       className="button"
                                       disabled={busy}
-                                      onClick={closeModal}
+                                      onClick={closeEditor}
                                     >
                                       取消更改
                                     </button>
@@ -2426,10 +2413,10 @@ export default function App() {
                       ) : (
                         <Empty text="点击“新增检查”，直接在图上录入" />
                       )}
-                      {role !== '前台' && removed.exams.length > 0 && (
-                        <div className="removed-records">
-                          <h3>已删除的检查</h3>
-                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
+                      {role === '店主' && removed.exams.length > 0 && (
+                        <details className="removed-records">
+                          <summary>已删除的检查</summary>
+
                           {removed.exams.map((record) => (
                             <div key={record.id}>
                               <span>
@@ -2445,7 +2432,7 @@ export default function App() {
                               </button>
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </section>
                   )}
@@ -2453,77 +2440,127 @@ export default function App() {
                     <section className="panel padded">
                       <div className="section-title">
                         <h2>历次验配与调试</h2>
-                        {role !== '前台' && (
+                        {role === '店主' && (
                           <button className="button primary" onClick={() => openForm('fitting')}>
                             <Plus size={16} />
                             新增验配记录
                           </button>
                         )}
                       </div>
+                      {editorKind === 'fitting' && !draft.id && editor}
                       {detail.fittings.length ? (
                         detail.fittings.map((f) => (
-                          <article className="record-card" key={f.id}>
-                            <div className="record-heading">
-                              <div>
-                                <span className="eyebrow">
-                                  {f.date} · {f.side}
-                                </span>
-                                <h3>{[f.brand, f.series, f.model].filter(Boolean).join(' · ')}</h3>
-                              </div>
-                              <div className="record-actions">
-                                <Headphones size={25} />
-                                {role !== '前台' && (
+                          <article
+                            className={
+                              'record-card' + (focusedRecord === f.id ? ' record-highlight' : '')
+                            }
+                            key={f.id}
+                            id={'record-' + f.id}
+                            tabIndex={-1}
+                          >
+                            {editorKind === 'fitting' && draft.id === f.id ? (
+                              editor
+                            ) : (
+                              <>
+                                <div className="record-heading">
+                                  <div>
+                                    <span className="eyebrow">
+                                      {f.date} · {f.side}
+                                    </span>
+                                    <h3>
+                                      <button
+                                        className="resource-title"
+                                        disabled={role !== '店主'}
+                                        onClick={() => openForm('fitting', f)}
+                                      >
+                                        {deviceName(f)}
+                                        {role === '店主' && <Pencil size={14} />}
+                                      </button>
+                                    </h3>
+                                  </div>
+                                  <div className="record-actions">
+                                    <Headphones size={25} />
+                                    {role === '店主' && (
+                                      <button
+                                        className="button small"
+                                        onClick={() => openForm('fitting', f)}
+                                      >
+                                        <Pencil size={14} />
+                                        编辑
+                                      </button>
+                                    )}
+                                    {role === '店主' && (
+                                      <button
+                                        className="button small"
+                                        onClick={() => openForm('repair', { fittingId: f.id })}
+                                      >
+                                        登记维修
+                                      </button>
+                                    )}
+                                    {role === '店主' && (
+                                      <button
+                                        className="button small danger-button"
+                                        disabled={busy}
+                                        onClick={() => changeRecord('fittings', f.id)}
+                                      >
+                                        删除
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                                <dl className="info-grid">
+                                  <div>
+                                    <dt>设备序列号</dt>
+                                    <dd>{deviceSerial(f)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>成交金额</dt>
+                                    <dd>¥ {money(f.amount)}</dd>
+                                  </div>
+                                  <div>
+                                    <dt>保修截止日期</dt>
+                                    <dd>{f.warranty || '未填写'}</dd>
+                                  </div>
+                                </dl>
+                                <button
+                                  className="record-note editable-value"
+                                  onClick={() => role === '店主' && openForm('fitting', f)}
+                                >
+                                  {f.notes || '添加验配说明'}
+                                  {role === '店主' && <Pencil size={13} />}
+                                </button>
+                                <div className="record-relations">
                                   <button
-                                    className="button small"
-                                    onClick={() => openForm('fitting', f)}
+                                    className="relation-link"
+                                    onClick={() => openCustomer(customer.id, '维修记录', '', f.id)}
                                   >
-                                    <Pencil size={14} />
-                                    编辑
+                                    <Wrench size={15} />
+                                    维修记录{' '}
+                                    <span>
+                                      {detail.repairs.filter((r) => r.fitting_id === f.id).length}
+                                    </span>
+                                    <ArrowRight size={14} />
                                   </button>
-                                )}
-                                {role !== '前台' && (
                                   <button
-                                    className="button small"
-                                    onClick={() => openForm('repair', { fittingId: f.id })}
+                                    className="relation-link"
+                                    onClick={() => openForm('followup')}
                                   >
-                                    登记维修
+                                    <CalendarDays size={15} />
+                                    安排随访
+                                    <ArrowRight size={14} />
                                   </button>
-                                )}
-                                {role !== '前台' && (
-                                  <button
-                                    className="button small danger-button"
-                                    disabled={busy}
-                                    onClick={() => changeRecord('fittings', f.id)}
-                                  >
-                                    删除
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-                            <dl className="info-grid">
-                              <div>
-                                <dt>设备序列号</dt>
-                                <dd>{deviceSerial(f)}</dd>
-                              </div>
-                              <div>
-                                <dt>成交金额</dt>
-                                <dd>¥ {money(f.amount)}</dd>
-                              </div>
-                              <div>
-                                <dt>保修截止日期</dt>
-                                <dd>{f.warranty || '未填写'}</dd>
-                              </div>
-                            </dl>
-                            <p className="record-note">{f.notes || '暂无验配说明'}</p>
+                                </div>
+                              </>
+                            )}
                           </article>
                         ))
                       ) : (
                         <Empty text="暂无验配记录" />
                       )}
-                      {role !== '前台' && removed.fittings.length > 0 && (
-                        <div className="removed-records">
-                          <h3>已删除的验配记录</h3>
-                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
+                      {role === '店主' && removed.fittings.length > 0 && (
+                        <details className="removed-records">
+                          <summary>已删除的验配记录</summary>
+
                           {removed.fittings.map((record) => (
                             <div key={record.id}>
                               <span>
@@ -2542,7 +2579,7 @@ export default function App() {
                               </button>
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </section>
                   )}
@@ -2551,13 +2588,17 @@ export default function App() {
                       <div className="section-title">
                         <div>
                           <h2>助听器维修记录</h2>
-                          <p className="muted">按验配设备记录故障、处理、更换零件与费用。</p>
                         </div>
-                        {role !== '前台' && (
+                        {role === '店主' && (
                           <button
                             className="button primary"
                             disabled={!detail.fittings.length}
-                            onClick={() => openForm('repair')}
+                            onClick={() =>
+                              openForm(
+                                'repair',
+                                repairDevice ? { fittingId: repairDevice } : undefined,
+                              )
+                            }
                           >
                             <Plus size={16} /> 登记维修
                           </button>
@@ -2566,98 +2607,140 @@ export default function App() {
                       {!detail.fittings.length && (
                         <div className="notice">请先录入这位客户的验配设备，再登记维修。</div>
                       )}
-                      {detail.repairs.map((r) => {
-                        const fitting = detail.fittings.find((f) => f.id === r.fitting_id);
-                        return (
-                          <article className="record-card" key={r.id}>
-                            <div className="record-heading">
-                              <div>
-                                <span className="eyebrow">
-                                  故障日期 {r.occurred_date} · {r.status}
-                                </span>
-                                <h3>
-                                  {[fitting?.brand, fitting?.series, fitting?.model]
-                                    .filter(Boolean)
-                                    .join(' · ')}
-                                </h3>
-                                <p className="muted">
-                                  {fitting?.side} · 序列号 {deviceSerial(fitting)}
-                                </p>
-                              </div>
-                              {role !== '前台' && (
-                                <div className="record-actions">
-                                  <button
-                                    className="button small"
-                                    onClick={() => openForm('repair', r)}
-                                  >
-                                    <Pencil size={14} /> 编辑
-                                  </button>
-                                  <button
-                                    className="button small danger-button"
-                                    disabled={busy}
-                                    onClick={() => changeRecord('repairs', r.id)}
-                                  >
-                                    删除
-                                  </button>
-                                </div>
-                              )}
-                            </div>
-                            <dl className="info-grid">
-                              <div>
-                                <dt>接收日期</dt>
-                                <dd>{r.received_date || '未填写'}</dd>
-                              </div>
-                              <div>
-                                <dt>完工日期</dt>
-                                <dd>{r.completed_date || '未填写'}</dd>
-                              </div>
-                              <div>
-                                <dt>维修费用</dt>
-                                <dd>¥ {money(r.price)}</dd>
-                              </div>
-                              <div>
-                                <dt>保修处理</dt>
-                                <dd>{r.warranty_covered ? '保修范围内' : '非保修'}</dd>
-                              </div>
-                            </dl>
-                            <p className="record-note">
-                              <strong>故障：</strong>
-                              {r.problem}
-                            </p>
-                            {r.findings && (
-                              <p className="record-note">
-                                <strong>检测：</strong>
-                                {r.findings}
-                              </p>
-                            )}
-                            {r.work_done && (
-                              <p className="record-note">
-                                <strong>维修：</strong>
-                                {r.work_done}
-                              </p>
-                            )}
-                            {r.parts && (
-                              <p className="record-note">
-                                <strong>更换零件：</strong>
-                                {r.parts}
-                              </p>
-                            )}
-                            {r.notes && (
-                              <p className="record-note">
-                                <strong>备注：</strong>
-                                {r.notes}
-                              </p>
-                            )}
-                          </article>
-                        );
-                      })}
-                      {!detail.repairs.length && detail.fittings.length > 0 && (
-                        <Empty text="暂无维修记录" />
+                      {repairDevice && (
+                        <div className="context-filter">
+                          <Headphones size={16} />
+                          <button
+                            className="relation-link"
+                            onClick={() => openCustomer(customer.id, '验配记录', repairDevice)}
+                          >
+                            {deviceName(detail.fittings.find((f) => f.id === repairDevice))}
+                          </button>
+                          <button
+                            className="icon-action"
+                            aria-label="查看全部设备的维修"
+                            onClick={() => updateRoute({ device: '', record: '' })}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
                       )}
-                      {role !== '前台' && removed.repairs.length > 0 && (
-                        <div className="removed-records">
-                          <h3>已删除的维修记录</h3>
-                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
+                      {editorKind === 'repair' && !draft.id && editor}
+                      {detail.repairs
+                        .filter((r) => !repairDevice || r.fitting_id === repairDevice)
+                        .map((r) => {
+                          const fitting = detail.fittings.find((f) => f.id === r.fitting_id);
+                          return (
+                            <article
+                              className={
+                                'record-card' + (focusedRecord === r.id ? ' record-highlight' : '')
+                              }
+                              key={r.id}
+                              id={'record-' + r.id}
+                              tabIndex={-1}
+                            >
+                              {editorKind === 'repair' && draft.id === r.id ? (
+                                editor
+                              ) : (
+                                <>
+                                  <div className="record-heading">
+                                    <div>
+                                      <span className="eyebrow">
+                                        故障日期 {r.occurred_date} · {r.status}
+                                      </span>
+                                      <h3>
+                                        <button
+                                          className="resource-title"
+                                          onClick={() =>
+                                            openCustomer(customer.id, '验配记录', r.fitting_id)
+                                          }
+                                        >
+                                          <Headphones size={16} />
+                                          {deviceName(fitting)}
+                                          <ArrowRight size={14} />
+                                        </button>
+                                      </h3>
+                                      <p className="muted">
+                                        {fitting?.side} · 序列号 {deviceSerial(fitting)}
+                                      </p>
+                                    </div>
+                                    {role === '店主' && (
+                                      <div className="record-actions">
+                                        <button
+                                          className="button small"
+                                          onClick={() => openForm('repair', r)}
+                                        >
+                                          <Pencil size={14} /> 编辑
+                                        </button>
+                                        <button
+                                          className="button small danger-button"
+                                          disabled={busy}
+                                          onClick={() => changeRecord('repairs', r.id)}
+                                        >
+                                          删除
+                                        </button>
+                                      </div>
+                                    )}
+                                  </div>
+                                  <dl className="info-grid">
+                                    <div>
+                                      <dt>接收日期</dt>
+                                      <dd>{r.received_date || '未填写'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>完工日期</dt>
+                                      <dd>{r.completed_date || '未填写'}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>维修费用</dt>
+                                      <dd>¥ {money(r.price)}</dd>
+                                    </div>
+                                    <div>
+                                      <dt>保修处理</dt>
+                                      <dd>{r.warranty_covered ? '保修范围内' : '非保修'}</dd>
+                                    </div>
+                                  </dl>
+                                  <p className="record-note">
+                                    <strong>故障：</strong>
+                                    {r.problem}
+                                  </p>
+                                  {r.findings && (
+                                    <p className="record-note">
+                                      <strong>检测：</strong>
+                                      {r.findings}
+                                    </p>
+                                  )}
+                                  {r.work_done && (
+                                    <p className="record-note">
+                                      <strong>维修：</strong>
+                                      {r.work_done}
+                                    </p>
+                                  )}
+                                  {r.parts && (
+                                    <p className="record-note">
+                                      <strong>更换零件：</strong>
+                                      {r.parts}
+                                    </p>
+                                  )}
+                                  {r.notes && (
+                                    <p className="record-note">
+                                      <strong>备注：</strong>
+                                      {r.notes}
+                                    </p>
+                                  )}
+                                </>
+                              )}
+                            </article>
+                          );
+                        })}
+                      {!detail.repairs.some(
+                        (r) => !repairDevice || r.fitting_id === repairDevice,
+                      ) &&
+                        detail.fittings.length > 0 && <Empty text="暂无维修记录" />}
+                      {role === '店主' && removed.repairs.length > 0 && (
+                        <details className="removed-records">
+                          <summary>已删除的维修记录</summary>
+
                           {removed.repairs.map((r) => (
                             <div key={r.id}>
                               <span>
@@ -2673,7 +2756,7 @@ export default function App() {
                               </button>
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </section>
                   )}
@@ -2682,18 +2765,18 @@ export default function App() {
                       <div className="panel-heading">
                         <div>
                           <h2>随访与服务记录</h2>
-                          <p>完整保留每次联系的结果</p>
                         </div>
                         <button className="button primary" onClick={() => openForm('followup')}>
                           <Plus size={16} />
                           安排随访
                         </button>
                       </div>
+                      {editorKind === 'followup' && !draft.id && editor}
                       {taskRows(detail.followups.map((f) => ({ ...f, name: customer.name })))}
                       {removed.followups.length > 0 && (
-                        <div className="removed-records padded">
-                          <h3>已删除的随访</h3>
-                          <p className="muted retention-note">删除后保留 30 天，到期自动清除。</p>
+                        <details className="removed-records padded">
+                          <summary>已删除的随访</summary>
+
                           {removed.followups.map((record) => (
                             <div key={record.id}>
                               <span>
@@ -2709,7 +2792,7 @@ export default function App() {
                               </button>
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </section>
                   )}
@@ -2750,7 +2833,7 @@ export default function App() {
                                 </div>
                                 <ArrowDownToLine size={18} />
                               </a>
-                              {role !== '前台' && (
+                              {role === '店主' && (
                                 <button
                                   className="button small danger-button"
                                   disabled={busy}
@@ -2766,12 +2849,10 @@ export default function App() {
                       ) : (
                         <Empty text="上传原始报告，与结构化检查数据一起保存" />
                       )}
-                      {role !== '前台' && removed.attachments.length > 0 && (
-                        <div className="removed-records">
-                          <h3>已删除的报告附件</h3>
-                          <p className="muted retention-note">
-                            删除后保留 30 天，到期自动清除文件。
-                          </p>
+                      {role === '店主' && removed.attachments.length > 0 && (
+                        <details className="removed-records">
+                          <summary>已删除的报告附件</summary>
+
                           {removed.attachments.map((a) => (
                             <div key={a.id}>
                               <span>
@@ -2788,7 +2869,7 @@ export default function App() {
                               </button>
                             </div>
                           ))}
-                        </div>
+                        </details>
                       )}
                     </section>
                   )}
@@ -2800,9 +2881,7 @@ export default function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <span className="eyebrow">持续的听力关怀</span>
                   <h1>随访与预约</h1>
-                  <p>让每一个需要联系的客户，都得到及时回应。</p>
                 </div>
                 <button
                   className="button primary"
@@ -2813,33 +2892,46 @@ export default function App() {
                   安排随访
                 </button>
               </div>
+              {editorKind === 'followup' && !draft.id && editor}
               <div className="stats-grid three">
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('待完成');
+                  }}
                   label="待完成"
                   value={pending.length}
                   unit="项"
-                  detail="全部待跟进任务"
+                  detail=""
                   icon={<ClipboardList />}
                 />
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('今日');
+                  }}
                   label="今日到期"
                   value={todayTasks.length}
                   unit="项"
-                  detail="优先处理当日服务"
+                  detail=""
                   icon={<CalendarDays />}
                 />
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('已完成');
+                  }}
                   label="已完成"
                   value={followups.length - pending.length}
                   unit="项"
-                  detail="已记录回访结果"
+                  detail=""
                   icon={<CheckCircle2 />}
                 />
               </div>
               <section className="panel">
                 <div className="list-toolbar">
                   <div className="tabs">
-                    {['待完成', '已逾期', '已完成', '全部'].map((t) => (
+                    {['待完成', '今日', '已逾期', '已完成', '全部'].map((t) => (
                       <button
                         key={t}
                         onClick={() => setTaskFilter(t)}
@@ -2854,11 +2946,13 @@ export default function App() {
                   followups.filter(
                     (f) =>
                       taskFilter === '全部' ||
-                      (taskFilter === '已完成'
-                        ? !!f.completed
-                        : taskFilter === '已逾期'
-                          ? !f.completed && f.due < today()
-                          : !f.completed),
+                      (taskFilter === '今日'
+                        ? !f.completed && f.due === today()
+                        : taskFilter === '已完成'
+                          ? !!f.completed
+                          : taskFilter === '已逾期'
+                            ? !f.completed && f.due < today()
+                            : !f.completed),
                   ),
                 )}
               </section>
@@ -2868,9 +2962,7 @@ export default function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <span className="eyebrow">用记录看见服务</span>
                   <h1>客户与服务统计</h1>
-                  <p>统计范围：当前门店全部档案，随保存的记录实时更新。</p>
                 </div>
                 {role === '店主' && (
                   <button className="button" onClick={exportData}>
@@ -2881,13 +2973,15 @@ export default function App() {
               </div>
               <div className="stats-grid">
                 <Stat
+                  onClick={() => navigate('customers')}
                   label="客户总数"
                   value={customers.length}
                   unit="位"
-                  detail="当前档案数量"
+                  detail=""
                   icon={<Users />}
                 />
                 <Stat
+                  onClick={() => navigate('devices')}
                   label="已验配占比"
                   value={
                     customers.length ? Math.round((fitted.length / customers.length) * 100) : 0
@@ -2897,6 +2991,10 @@ export default function App() {
                   icon={<Headphones />}
                 />
                 <Stat
+                  onClick={() => {
+                    navigate('followups');
+                    setTaskFilter('已完成');
+                  }}
                   label="随访完成率"
                   value={
                     followups.length
@@ -2908,6 +3006,7 @@ export default function App() {
                   icon={<CheckCircle2 />}
                 />
                 <Stat
+                  onClick={() => navigate('warranties')}
                   label="保修需关注"
                   value={warrantyAlerts.length}
                   unit="项"
@@ -2916,53 +3015,18 @@ export default function App() {
                   warning
                 />
               </div>
-              <section className="panel padded warranty-panel">
-                <div className="section-title">
-                  <div>
-                    <h2>保修到期提醒</h2>
-                    <p className="muted">
-                      列出已过期和未来 90 天内到期的设备，点击客户可查看验配档案。
-                    </p>
-                  </div>
-                  <Bell size={20} />
-                </div>
-                {warrantyAlerts.length ? (
-                  <div className="warranty-list">
-                    {warrantyAlerts.map((item) => {
-                      const remaining = daysUntil(item.warranty);
-                      return (
-                        <button key={item.id} onClick={() => openCustomer(item.customer_id)}>
-                          <span>
-                            <strong>{item.name}</strong>
-                            <small>
-                              {[item.brand, item.series, item.model].filter(Boolean).join(' · ')}
-                            </small>
-                          </span>
-                          <span className="warranty-date">
-                            {item.warranty}
-                            <small className={remaining < 0 ? 'danger' : ''}>
-                              {remaining < 0
-                                ? `已过期 ${-remaining} 天`
-                                : remaining === 0
-                                  ? '今天到期'
-                                  : `${remaining} 天后到期`}
-                            </small>
-                          </span>
-                          <ChevronRight size={17} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Empty text="暂无已过期或 90 天内到期的保修记录" />
-                )}
-              </section>
+              <button className="section-shortcut panel" onClick={() => navigate('warranties')}>
+                <Shield size={19} />
+                <span>查看保修到期设备</span>
+                <span className="count">{warrantyAlerts.length}</span>
+                <ArrowRight size={17} />
+              </button>
               <div className="report-grid">
                 <Distribution
                   title="客户来源"
-                  subtitle="了解客户从哪里认识门店"
+                  subtitle=""
                   data={[...new Set(customers.map((c) => c.source))].map((s) => ({
-                    label: s,
+                    label: s || '未填写',
                     count: customers.filter((c) => c.source === s).length,
                   }))}
                 />
@@ -2990,6 +3054,10 @@ export default function App() {
                       label: '80 岁及以上',
                       count: customers.filter((c) => age(c.birthDate) >= 80).length,
                     },
+                    {
+                      label: '未填写',
+                      count: customers.filter((c) => !Number.isFinite(age(c.birthDate))).length,
+                    },
                   ]}
                 />
                 <Distribution
@@ -3015,9 +3083,7 @@ export default function App() {
             <>
               <div className="page-heading">
                 <div>
-                  <span className="eyebrow">工作空间</span>
                   <h1>门店设置</h1>
-                  <p>角色权限与数据导出。</p>
                 </div>
               </div>
               <div className="detail-grid">
@@ -3037,31 +3103,11 @@ export default function App() {
                       <dd>{identity.demo ? '本地演示' : '1.0'}</dd>
                     </div>
                   </dl>
-                  <h3>角色权限</h3>
-                  <table className="permissions">
-                    <thead>
-                      <tr>
-                        <th>能力</th>
-                        <th>店主</th>
-                        <th>验配师</th>
-                        <th>前台</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {[
-                        ['客户与随访', '✓', '✓', '✓'],
-                        ['检查、验配与维修', '✓', '✓', '—'],
-                        ['报告上传与查看', '✓', '✓', '✓'],
-                        ['全量档案导出', '✓', '—', '—'],
-                      ].map((row) => (
-                        <tr key={row[0]}>
-                          {row.map((v, i) => (
-                            <td key={i}>{v}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <button className="button full" onClick={() => navigate('accounts')}>
+                    <Users size={17} />
+                    账户管理
+                    <ChevronRight size={16} />
+                  </button>
                 </section>
                 <section className="panel padded">
                   <div className="section-title">
@@ -3079,8 +3125,8 @@ export default function App() {
                     <ShieldCheck size={20} />
                     <p>
                       {identity.demo
-                        ? '演示登录允许公开切换角色，仅供虚构数据体验。'
-                        : `当前员工：${identity.name}（${identity.email}）。权限由管理员分配，操作会记录员工身份。请定期备份数据库及报告附件。`}
+                        ? '演示环境仅用于虚构数据体验。'
+                        : `当前账户：${identity.name}（${identity.email}）。请定期备份数据库及报告附件。`}
                     </p>
                   </div>
                 </section>
@@ -3088,11 +3134,32 @@ export default function App() {
             </>
           )}
         </div>
-        <footer className="app-footer">
-          聆序 HEARING CARE <span>让每一次服务，有迹可循。</span>
-          <small>{identity.demo ? '演示数据 · 仅供体验' : '客户资料 · 授权员工访问'}</small>
-        </footer>
       </main>
+      {accountAnchor && (
+        <AccountMenu
+          anchor={accountAnchor}
+          identity={identity}
+          close={() => setAccountAnchor(null)}
+          manage={() => navigate('accounts')}
+          logout={async () => {
+            if (!canLeaveEditor()) return;
+            setAccountAnchor(null);
+            try {
+              const result = await api('/logout', 'POST');
+              if (result.logoutUrl) window.location.assign(result.logoutUrl);
+              else {
+                setRole('');
+                setSelected(null);
+                setEditorKind('');
+                setEditingField('');
+                accountDirty.current = false;
+              }
+            } catch (reason) {
+              setError((reason as Error).message);
+            }
+          }}
+        />
+      )}
       {toast && (
         <div className="toast" role="status">
           <CheckCircle2 size={19} />
@@ -3197,350 +3264,11 @@ export default function App() {
           </section>
         </div>
       )}
-      {modal && modal !== 'exam' && (
-        <Modal
-          title={
-            {
-              customer: draft.id ? '编辑客户档案' : '新建客户档案',
-              exam: draft.id ? '编辑听力检查' : '录入听力检查',
-              fitting: draft.id ? '编辑验配记录' : '新增验配记录',
-              repair: draft.id ? '编辑维修记录' : '登记设备维修',
-              followup: draft.id ? '编辑随访与预约' : '安排随访与预约',
-              complete: '记录随访结果',
-            }[modal] || ''
-          }
-          onClose={closeModal}
-          wide={modal === 'exam'}
-        >
-          <form onSubmit={submit}>
-            <div className="modal-body">
-              {error && <div className="error">{error}</div>}
-              {modal === 'customer' &&
-                customers.some(
-                  (c) =>
-                    c.id !== draft.id &&
-                    c.name === draft.name.trim() &&
-                    c.birthDate === draft.birthDate,
-                ) && (
-                  <div className="duplicate-notice">
-                    已有同名、同出生日期的客户。请先核对是否重复建档；如确为不同客户，可以继续保存。
-                  </div>
-                )}
-              {modal === 'customer' && (
-                <div className="form-grid">
-                  <Field label="客户姓名 *">
-                    <input
-                      autoFocus
-                      required
-                      maxLength={40}
-                      value={draft.name}
-                      onChange={(e) => change('name', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="性别">
-                    <select value={draft.gender} onChange={(e) => change('gender', e.target.value)}>
-                      {['未填写', '男', '女'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="出生日期">
-                    <input
-                      type="date"
-                      max={today()}
-                      min="1900-01-01"
-                      value={draft.birthDate}
-                      onChange={(e) => change('birthDate', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="联系电话">
-                    <input
-                      maxLength={30}
-                      value={draft.phone}
-                      placeholder="填写客户相关信息"
-                      onChange={(e) => change('phone', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="其他联系人">
-                    <input
-                      maxLength={100}
-                      value={draft.contact}
-                      onChange={(e) => change('contact', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="其他联系人电话">
-                    <input
-                      maxLength={30}
-                      value={draft.contactPhone || ''}
-                      onChange={(e) => change('contactPhone', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="住址" wide>
-                    <input
-                      maxLength={300}
-                      value={draft.address || ''}
-                      onChange={(e) => change('address', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="客户来源">
-                    <select value={draft.source} onChange={(e) => change('source', e.target.value)}>
-                      {['自然到店', '老客转介绍', '社区活动', '线上咨询', '其他'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="服务阶段">
-                    <select value={draft.status} onChange={(e) => change('status', e.target.value)}>
-                      {statuses.slice(1).map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="听力与健康情况" wide>
-                    <textarea
-                      value={draft.history}
-                      onChange={(e) => change('history', e.target.value)}
-                      placeholder="听力困难、耳部病史、既往助听器使用情况…"
-                    />
-                  </Field>
-                  <Field label="聆听需求与期望" wide>
-                    <textarea
-                      value={draft.needs}
-                      onChange={(e) => change('needs', e.target.value)}
-                      placeholder="客户希望改善哪些生活场景？"
-                    />
-                  </Field>
-                </div>
-              )}
-              {modal === 'fitting' && (
-                <div className="form-grid">
-                  <Field label="验配 / 调试日期 *">
-                    <input
-                      type="date"
-                      required
-                      max={today()}
-                      value={draft.date}
-                      onChange={(e) => change('date', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="佩戴耳侧">
-                    <select value={draft.side} onChange={(e) => change('side', e.target.value)}>
-                      {['双耳', '左耳', '右耳'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <FittingDeviceFields value={draft} onChange={change} />
-                  <Field label="成交金额（元）">
-                    <input
-                      type="number"
-                      min="0"
-                      max="10000000"
-                      step="0.01"
-                      value={draft.amount}
-                      onChange={(e) => change('amount', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="保修截止">
-                    <input
-                      type="date"
-                      value={draft.warranty}
-                      onChange={(e) => change('warranty', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="试戴、调试、验证与交付说明" wide>
-                    <textarea
-                      value={draft.notes}
-                      onChange={(e) => change('notes', e.target.value)}
-                      placeholder="记录调试原因、参数变化、真耳验证、客户反馈及使用指导。"
-                    />
-                  </Field>
-                </div>
-              )}
-              {modal === 'repair' && (
-                <div className="form-grid">
-                  <Field label="关联验配设备 *" wide>
-                    <select
-                      required
-                      value={draft.fittingId}
-                      onChange={(e) => change('fittingId', e.target.value)}
-                    >
-                      {detail?.fittings.map((f) => (
-                        <option key={f.id} value={f.id}>
-                          {[f.brand, f.series, f.model, f.side, deviceSerial(f)]
-                            .filter(Boolean)
-                            .join(' · ')}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="故障发生日期 *">
-                    <input
-                      type="date"
-                      required
-                      value={draft.occurredDate}
-                      onChange={(e) => change('occurredDate', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="门店接收日期">
-                    <input
-                      type="date"
-                      value={draft.receivedDate}
-                      onChange={(e) => change('receivedDate', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="维修状态">
-                    <select value={draft.status} onChange={(e) => change('status', e.target.value)}>
-                      {['待送修', '维修中', '已完成', '无法修复'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="完工日期">
-                    <input
-                      type="date"
-                      value={draft.completedDate}
-                      onChange={(e) => change('completedDate', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="故障现象 / 客户反馈" wide>
-                    <textarea
-                      value={draft.problem}
-                      onChange={(e) => change('problem', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="检测结果" wide>
-                    <textarea
-                      value={draft.findings}
-                      onChange={(e) => change('findings', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="维修过程与处理结果" wide>
-                    <textarea
-                      value={draft.workDone}
-                      onChange={(e) => change('workDone', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="更换零件及数量" wide>
-                    <textarea
-                      value={draft.parts}
-                      onChange={(e) => change('parts', e.target.value)}
-                      placeholder="例如：左耳受话器 1 件、耳塞 2 件"
-                    />
-                  </Field>
-                  <Field label="维修费用（元）">
-                    <input
-                      type="number"
-                      min="0"
-                      max="10000000"
-                      step="0.01"
-                      value={draft.price}
-                      onChange={(e) => change('price', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="保修处理">
-                    <select
-                      value={draft.warrantyCovered ? '是' : '否'}
-                      onChange={(e) => change('warrantyCovered', e.target.value === '是')}
-                    >
-                      <option>否</option>
-                      <option>是</option>
-                    </select>
-                  </Field>
-                  <Field label="备注" wide>
-                    <textarea
-                      value={draft.notes}
-                      onChange={(e) => change('notes', e.target.value)}
-                    />
-                  </Field>
-                </div>
-              )}
-              {modal === 'followup' && (
-                <div className="form-grid">
-                  <Field label="客户 *" wide>
-                    <select
-                      required
-                      value={draft.customerId}
-                      disabled={!!draft.id}
-                      onChange={(e) => change('customerId', e.target.value)}
-                    >
-                      {customers.map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.name} · {c.status}
-                        </option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="计划日期 *">
-                    <input
-                      type="date"
-                      required
-                      value={draft.due}
-                      onChange={(e) => change('due', e.target.value)}
-                    />
-                  </Field>
-                  <Field label="服务类型">
-                    <select value={draft.type} onChange={(e) => change('type', e.target.value)}>
-                      {['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((v) => (
-                        <option key={v}>{v}</option>
-                      ))}
-                    </select>
-                  </Field>
-                  <Field label="计划内容" wide>
-                    <textarea
-                      value={draft.note}
-                      onChange={(e) => change('note', e.target.value)}
-                      placeholder="本次需要关注的问题、希望了解的佩戴反馈…"
-                    />
-                  </Field>
-                  {!!draft.completed && (
-                    <Field label="本次联系结果 *" wide>
-                      <textarea
-                        required
-                        value={draft.result || ''}
-                        onChange={(e) => change('result', e.target.value)}
-                      />
-                    </Field>
-                  )}
-                </div>
-              )}
-              {modal === 'complete' && (
-                <>
-                  <div className="completion-summary">
-                    <strong>
-                      {draft.name} · {draft.type}
-                    </strong>
-                    <p>{draft.note}</p>
-                    <small>计划日期 {draft.due}</small>
-                  </div>
-                  <Field label="本次联系结果 *">
-                    <textarea
-                      autoFocus
-                      required
-                      value={draft.result}
-                      onChange={(e) => change('result', e.target.value)}
-                      placeholder="记录客户反馈、已提供的服务及下一步建议。"
-                    />
-                  </Field>
-                </>
-              )}
-            </div>
-            <footer className="modal-footer">
-              <span>保存后将加入客户服务档案</span>
-              <button className="button" type="button" onClick={closeModal} disabled={busy}>
-                取消
-              </button>
-              <button className="button primary" type="submit" disabled={busy}>
-                {busy ? '保存中…' : '保存记录'}
-              </button>
-            </footer>
-          </form>
-        </Modal>
-      )}
     </div>
   );
 }
 function Stat({
+  onClick,
   label,
   value,
   unit,
@@ -3548,6 +3276,7 @@ function Stat({
   icon,
   warning = false,
 }: {
+  onClick?: () => void;
   label: string;
   value: number;
   unit: string;
@@ -3556,7 +3285,7 @@ function Stat({
   warning?: boolean;
 }) {
   return (
-    <div className={'stat ' + (warning ? 'warning' : '')}>
+    <button type="button" onClick={onClick} className={'stat ' + (warning ? 'warning' : '')}>
       <div className="stat-top">
         <span>{label}</span>
         {icon}
@@ -3566,7 +3295,7 @@ function Stat({
         <small>{unit}</small>
       </div>
       <p>{detail}</p>
-    </div>
+    </button>
   );
 }
 function Distribution({
@@ -3582,7 +3311,7 @@ function Distribution({
   return (
     <section className="panel padded">
       <h2>{title}</h2>
-      <p className="muted">{subtitle}</p>
+      {subtitle && <p className="muted">{subtitle}</p>}
       <div className="distribution">
         {data.map((d) => (
           <div key={d.label}>
