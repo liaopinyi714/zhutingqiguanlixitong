@@ -653,6 +653,8 @@ export default function App() {
     [editingValue, setEditingValue] = useState(''),
     [search, setSearch] = useState(''),
     [searchOpen, setSearchOpen] = useState(false),
+    [searchMounted, setSearchMounted] = useState(false),
+    [searchMode, setSearchMode] = useState<'inline' | 'command'>('inline'),
     [searchPosition, setSearchPosition] = useState({
       top: 80,
       left: 12,
@@ -764,22 +766,18 @@ export default function App() {
     const viewportWidth = window.visualViewport?.width ?? window.innerWidth;
     const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
     const mobile = viewportWidth <= 650;
-    const width = Math.min(
-      viewportWidth - 24,
-      mobile
-        ? viewportWidth - 24
-        : Math.max(rect.width, trigger.classList.contains('sidebar-search') ? 480 : rect.width),
-    );
-    const left =
-      mobile && trigger.classList.contains('mobile-search')
-        ? 12
-        : Math.max(12, Math.min(rect.left, viewportWidth - width - 12));
-    const top = mobile && trigger.classList.contains('mobile-search') ? 63 : Math.max(10, rect.top);
-    setSearchPosition({ top, left, width, maxHeight: Math.max(155, viewportHeight - top - 12) });
+    const inline = trigger.classList.contains('home-search') && !mobile;
+    setSearchMode(inline ? 'inline' : 'command');
+    const width = inline ? Math.min(rect.width, viewportWidth - 24) : Math.min(720, viewportWidth - 24);
+    const left = inline ? Math.max(12, Math.min(rect.left, viewportWidth - width - 12))
+      : (viewportWidth - width) / 2;
+    const top = inline ? Math.max(12, rect.top) : Math.min(76, Math.max(12, viewportHeight * 0.08));
+    setSearchPosition({ top, left, width, maxHeight: Math.max(155, Math.min(620, viewportHeight - top - 16)) });
   }
   function openSearch(trigger: HTMLButtonElement) {
     searchTriggerRef.current = trigger;
     positionSearch(trigger);
+    setSearchMounted(true);
     setSearchOpen(true);
   }
   const customer = customers.find((c) => c.id === selected),
@@ -913,6 +911,10 @@ export default function App() {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        if (searchOpen) {
+          setSearchOpen(false);
+          return;
+        }
         if (role) {
           const selector =
             window.innerWidth <= 650
@@ -928,7 +930,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [role, page]);
+  }, [role, page, searchOpen]);
   useEffect(() => {
     if (!searchOpen) return;
     const update = () => {
@@ -943,6 +945,25 @@ export default function App() {
       window.visualViewport?.removeEventListener('resize', update);
     };
   }, [searchOpen]);
+  useEffect(() => {
+    if (searchOpen || !searchMounted) return;
+    const timer = window.setTimeout(() => {
+      setSearchMounted(false);
+      searchTriggerRef.current?.focus({ preventScroll: true });
+    }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140);
+    return () => window.clearTimeout(timer);
+  }, [searchOpen, searchMounted]);
+  useEffect(() => {
+    if (!searchOpen || searchMode !== 'command') return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => { document.body.style.overflow = previous; };
+  }, [searchOpen, searchMode]);
+  useEffect(() => {
+    if (!searchOpen) return;
+    document.querySelector('.global-search-list > button.active')
+      ?.scrollIntoView({ block: 'nearest' });
+  }, [searchActive, searchOpen, globalResults]);
   useEffect(() => {
     window.scrollTo(0, 0);
   }, [page, selected]);
@@ -3266,9 +3287,9 @@ export default function App() {
           {toast}
         </div>
       )}
-      {searchOpen && (
+      {searchMounted && (
         <div
-          className="global-search-backdrop"
+          className={'global-search-backdrop search-' + searchMode + (!searchOpen ? ' search-closing' : '')}
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSearchOpen(false);
           }}
@@ -3277,15 +3298,25 @@ export default function App() {
             className="global-search-panel"
             style={searchPosition}
             role="dialog"
-            aria-modal="false"
+            aria-modal={searchMode === 'command'}
             aria-label="搜索客户信息"
+            onKeyDown={(event) => {
+              if (event.key !== 'Tab') return;
+              const nodes = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, button:not(:disabled)'));
+              const first = nodes[0], last = nodes[nodes.length - 1];
+              if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault(); last?.focus();
+              } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault(); first?.focus();
+              }
+            }}
           >
             <div className="global-search-input">
               <Search size={21} />
               <input
                 autoFocus
                 aria-label="搜索客户信息"
-                placeholder="搜索姓名、电话、检查、设备、维修或随访..."
+                placeholder="搜索客户、电话、型号或服务记录…"
                 value={globalQuery}
                 maxLength={80}
                 onChange={(e) => {
@@ -3311,9 +3342,10 @@ export default function App() {
                 }}
               />
               <button aria-label="关闭搜索" onClick={() => setSearchOpen(false)}>
-                <X size={18} />
+                {searchMode === 'inline' ? <><kbd>Ctrl</kbd><kbd>K</kbd></> : <kbd>Esc</kbd>}
               </button>
             </div>
+            <div className="global-search-results">
             <div className="global-search-list">
               <div className="global-search-caption">
                 {globalQuery.trim()
@@ -3331,15 +3363,15 @@ export default function App() {
                   onMouseEnter={() => setSearchActive(index)}
                   onClick={() => openCustomer(entry.id)}
                 >
-                  <span className="search-result-avatar">{entry.name.slice(-2)}</span>
+                  <ContactRound className="search-result-icon" size={19} strokeWidth={1.5} />
                   <span className="search-result-content">
                     <strong>{entry.name}</strong>
                     <small>
-                      {entry.phone || '未填写电话'} · {entry.source} · {entry.status}
+                      <span aria-hidden="true">—</span> {entry.phone || entry.status}
                     </small>
                   </span>
                   <span className="search-result-meta">
-                    查看档案 <ArrowRight size={15} />
+                    <ArrowRight size={18} />
                   </span>
                 </button>
               ))}
@@ -3355,12 +3387,13 @@ export default function App() {
                 <kbd>↓</kbd> 选择结果
               </span>
               <span>
-                <kbd>Enter</kbd> 打开档案
+                <kbd>↵</kbd> 打开
               </span>
               <span>
                 <kbd>Esc</kbd> 关闭
               </span>
             </footer>
+            </div>
           </section>
         </div>
       )}
