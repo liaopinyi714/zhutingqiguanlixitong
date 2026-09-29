@@ -142,8 +142,26 @@ h3 {
   font-size: 14px;
 }
 .cf-shell .button {
-  min-height: 38px;
-  border-radius: 7px;
+  min-height: 40px;
+  border-radius: 9px;
+  padding: 9px 15px;
+  font-weight: 400;
+  color: #30343a;
+  border-color: #d8dade;
+  background: linear-gradient(#fff, #fdfdfd);
+  box-shadow: 0 1px 2px #16202b0b, inset 0 1px 0 #fff;
+  transition: background 160ms ease, border-color 160ms ease,
+    box-shadow 160ms ease, transform 100ms ease;
+}
+.cf-shell .button:hover:not(:disabled) {
+  background: #f6f7f8;
+  border-color: #bfc3c9;
+  box-shadow: 0 2px 4px #16202b0c, inset 0 1px 0 #fff;
+}
+.cf-shell .button:active:not(:disabled),
+.cf-login .button:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: inset 0 1px 3px #16202b14;
 }
 .cf-shell .button.small {
   min-height: 32px;
@@ -151,15 +169,16 @@ h3 {
 }
 .cf-shell .button.primary,
 .cf-login .button.primary {
-  background: var(--ui-blue);
-  border-color: var(--ui-blue);
+  background: linear-gradient(180deg, #3889ff 0%, #0871f5 100%);
+  border-color: #1468d9;
   color: #fff;
-  box-shadow: 0 1px 2px #0866e81a;
+  box-shadow: inset 0 1px 0 #ffffff50, 0 1px 2px #075ac926;
 }
-.cf-shell .button.primary:hover,
-.cf-login .button.primary:hover {
-  background: #0757c5;
-  border-color: #0757c5;
+.cf-shell .button.primary:hover:not(:disabled),
+.cf-login .button.primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #297df4 0%, #0665df 100%);
+  border-color: #105dc5;
+  box-shadow: inset 0 1px 0 #ffffff40, 0 2px 5px #075ac926;
 }
 input,
 select,

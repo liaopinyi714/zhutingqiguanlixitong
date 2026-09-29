@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import {
-  Activity,
+  House,
+  ContactRound,
+  ChartNoAxesCombined,
   Wrench,
   Menu,
   Shield,
@@ -17,7 +19,6 @@ import {
   Ear,
   FileText,
   Headphones,
-  LayoutDashboard,
   Plus,
   Pencil,
   RotateCcw,
@@ -1413,13 +1414,13 @@ export default function App() {
       </div>
     );
   const navs = [
-    ['overview', '工作台', LayoutDashboard],
-    ['customers', '客户档案', Users],
+    ['overview', '工作台', House],
+    ['customers', '客户档案', ContactRound],
     ['devices', '验配设备', Headphones],
     ['repairs', '设备维修', Wrench],
     ['followups', '随访预约', CalendarDays],
     ['warranties', '保修提醒', Shield],
-    ['reports', '统计分析', Activity],
+    ['reports', '统计分析', ChartNoAxesCombined],
     ['recycle', '回收站', Trash2],
     ['settings', '设置', Settings2],
   ] as const;

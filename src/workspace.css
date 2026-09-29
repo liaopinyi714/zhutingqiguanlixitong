@@ -18,7 +18,7 @@
   min-height: 100dvh;
 }
 .cf-shell .lucide {
-  stroke-width: 1.65;
+  stroke-width: 1.5;
   flex-shrink: 0;
 }
 button:focus-visible,
@@ -43,8 +43,8 @@ textarea:focus-visible {
   border-right: 1px solid var(--ui-border);
   overflow: hidden;
   transition:
-    width 380ms cubic-bezier(0.22, 1, 0.36, 1),
-    box-shadow 380ms ease;
+    width 420ms cubic-bezier(0.25, 0.8, 0.25, 1),
+    box-shadow 300ms ease;
 }
 .cf-shell .sidebar-content {
   width: var(--sidebar-full-width);
@@ -143,7 +143,7 @@ textarea:focus-visible {
 .cf-shell .sidebar nav button svg {
   width: 18px;
   height: 18px;
-  color: #7b7b7b;
+  color: #858a90;
   stroke-width: 1.5;
 }
 .cf-shell .sidebar nav button:hover {
@@ -266,7 +266,7 @@ textarea:focus-visible {
 .cf-shell .main {
   margin-left: var(--sidebar-full-width);
   min-width: 0;
-  transition: margin-left 380ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: margin-left 420ms cubic-bezier(0.25, 0.8, 0.25, 1);
 }
 .cf-shell.sidebar-collapsed .main {
   margin-left: var(--sidebar-rail-width);
@@ -319,10 +319,14 @@ textarea:focus-visible {
 }
 .cf-shell .home-search {
   height: 58px;
-  border-radius: 10px;
+  border: 1px solid #d5d7da;
+  border-radius: 13px;
+  background: #fff;
   box-shadow:
-    0 0 0 4px #f1f1f1,
-    0 1px 3px #0000000a;
+    0 2px 3px #20252b18,
+    0 0 0 5px #f6f6f7,
+    0 0 0 6px #e7e8ea;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 .cf-shell .home-shortcuts {
   margin-bottom: 32px;
@@ -1343,6 +1347,142 @@ textarea:focus-visible {
 }
 .cf-shell .export-card .button {
   min-height: 39px;
+}
+
+/* Shared controls: quiet outlines, restrained depth, and consistent feedback. */
+.cf-shell .sidebar nav button,
+.cf-shell .icon-button,
+.cf-shell .icon-action,
+.account-menu button,
+.cf-shell .home-shortcuts button {
+  transition: color 160ms ease, background-color 160ms ease,
+    border-color 160ms ease, box-shadow 160ms ease;
+}
+.cf-shell .sidebar nav button.active {
+  background: #ededee;
+  font-weight: 400;
+}
+.cf-shell .sidebar nav button.active svg { color: #555b63; }
+.cf-shell .sidebar nav button:hover:not(.active) { background: #f0f1f2; }
+.cf-shell .icon-button,
+.cf-shell .icon-action {
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 7px;
+  color: #81868e;
+}
+.cf-shell .icon-button:hover:not(:disabled),
+.cf-shell .icon-action:hover:not(:disabled) {
+  color: #303840;
+  background: #eff0f2;
+}
+.cf-shell .button.danger-button { color: #b33c3c; border-color: #e4cccc; }
+.cf-shell .danger-button:hover:not(:disabled) {
+  color: #a22d2d;
+  background: #fff3f3;
+  border-color: #dcb7b7;
+}
+.cf-shell .section-title > .lucide,
+.cf-shell .panel-heading > .lucide { color: #92969d; }
+.cf-shell .button > .lucide { width: 17px; height: 17px; }
+.cf-shell .home-search:hover {
+  border-color: #bfc3c9;
+  box-shadow: 0 2px 4px #20252b1c, 0 0 0 5px #f3f4f5, 0 0 0 6px #dfe1e4;
+}
+.cf-shell .home-search:focus-visible {
+  outline-offset: 7px;
+}
+.cf-shell kbd,
+.global-search-panel kbd {
+  border: 1px solid #e3e4e7;
+  border-bottom-color: #d3d5d9;
+  border-radius: 5px;
+  padding: 3px 5px;
+  color: #686d75;
+  background: linear-gradient(#fff, #f5f5f6);
+  font-family: inherit;
+  box-shadow: 0 1px 1px #00000006;
+}
+.cf-shell .tabs,
+.cf-shell .detail-tabs {
+  display: inline-flex;
+  max-width: 100%;
+  gap: 3px;
+  padding: 4px;
+  border: 0;
+  border-radius: 10px;
+  background: #f0f1f2;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.cf-shell .tabs button,
+.cf-shell .detail-tabs button {
+  flex-shrink: 0;
+  min-height: 35px;
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: #747981;
+  font-size: 14px;
+  font-weight: 400;
+  white-space: nowrap;
+  transition: color 160ms ease, background-color 160ms ease, box-shadow 160ms ease;
+}
+.cf-shell .tabs button:hover,
+.cf-shell .detail-tabs button:hover { color: #30343a; background: #ffffff80; }
+.cf-shell .tabs button.active,
+.cf-shell .detail-tabs button.active {
+  color: #252a31;
+  background: #fff;
+  border-color: #d8dade;
+  box-shadow: 0 1px 3px #11111118;
+  font-weight: 500;
+}
+.cf-shell .detail-tabs button.active::after { display: none; }
+.cf-shell .tabs button span,
+.cf-shell .detail-tabs button span {
+  color: #747981;
+  background: #e9eaec;
+  font-size: 11px;
+  border-radius: 4px;
+}
+.global-search-panel {
+  border-color: #dedfe2;
+  box-shadow: 0 8px 24px #20252b12, 0 2px 5px #20252b10;
+  animation: control-reveal 180ms ease-out;
+}
+.global-search-input { min-height: 58px; }
+.global-search-caption { font-size: 13px; color: #747981; }
+.global-search-list > button { transition: background-color 140ms ease; }
+.global-search-list > button:hover,
+.global-search-list > button.active { background: #f5f6f7; }
+.search-result-avatar {
+  background: #f7f7f8;
+  border: 1px solid #e7e8ea;
+  color: #727882;
+  border-radius: 8px;
+}
+.search-result-content strong { font-weight: 500; }
+.global-search-panel footer { background: #fafafa; font-size: 12px; }
+.account-menu {
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
+  box-shadow: 0 6px 22px #20252b14, 0 1px 3px #20252b0a;
+  animation: control-reveal 160ms ease-out;
+}
+.account-menu .lucide { stroke-width: 1.5; }
+.cf-shell .account-section-heading { background: #fafafa; border-radius: 10px 10px 0 0; }
+.cf-shell .account-store-row,
+.cf-shell .account-row { transition: background-color 160ms ease; }
+.cf-shell .account-store-row:hover,
+.cf-shell .account-row:hover { background: #fcfcfd; }
+.cf-shell .editable-value > svg { transition: opacity 160ms ease, color 160ms ease; }
+@keyframes control-reveal {
+  from { opacity: 0; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (hover: none) {
+  .cf-shell .editable-value > svg { opacity: 1; }
 }
 @media (max-width: 700px) {
   .export-options {
