@@ -34,7 +34,7 @@ import { frequencies, pta } from '../server/domain';
 import { HearingEditor } from './HearingEditor';
 import { Field, FittingDeviceFields } from './Fields';
 import { RecordEditor } from './RecordEditor';
-import { Accounts, AccountMenu } from './Accounts';
+import { Accounts, AccountsSkeleton, AccountMenu } from './Accounts';
 import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
@@ -134,6 +134,56 @@ function LoadingRows({ lines = 3, label = '正在读取数据' }: { lines?: numb
       ))}
     </div>
   );
+}
+function TaskListSkeleton({ lines = 4 }: { lines?: number }) {
+  return <div className="task-list" role="status" aria-label="正在读取随访任务">
+    {Array.from({ length: lines }, (_, index) => <div className="task-row" key={index}>
+      <span className="skeleton-mark task-icon" />
+      <div className="task-body skeleton-task-body">
+        <span className="skeleton-line skeleton-task-name" />
+        <span className="skeleton-line skeleton-task-description" />
+        <span className="skeleton-line skeleton-task-date" />
+      </div>
+      <span className="skeleton-line skeleton-task-action" />
+    </div>)}
+  </div>;
+}
+function JourneySkeleton() {
+  return <div className="journey-bars" role="status" aria-label="正在读取服务阶段">
+    {Array.from({ length: 4 }, (_, index) => <div className="journey-placeholder" key={index}>
+      <span className="skeleton-line" /><span className="skeleton-line skeleton-count" />
+      <div className="bar-track"><span className="skeleton-line" /></div>
+    </div>)}
+  </div>;
+}
+function CustomerDetailSkeleton({ tab }: { tab: string }) {
+  if (tab === '概览') return <div className="detail-grid" role="status" aria-label="正在读取客户档案">
+    <div>
+      <section className="panel padded"><div className="section-title"><h2>基本资料</h2><FileText size={18} /></div><div className="skeleton-info-grid"><LoadingRows lines={5} /><LoadingRows lines={5} /></div></section>
+      <section className="panel padded space-top"><div className="section-title"><h2>最近听力检查</h2></div><div className="skeleton-chart skeleton-surface" /></section>
+    </div>
+    <div>
+      <section className="panel padded"><div className="section-title"><h2>验配设备</h2><Headphones size={18} /></div><LoadingRows lines={2} /></section>
+      <section className="panel padded space-top"><div className="section-title"><h2>随访记录</h2><CalendarDays size={18} /></div><LoadingRows lines={2} /></section>
+    </div>
+  </div>;
+  if (tab === '听力检查') return <section className="panel padded" role="status" aria-label="正在读取听力检查">
+    <div className="section-title"><h2>听力检查</h2></div><div className="skeleton-chart skeleton-surface" />
+  </section>;
+  return <section className="panel padded" role="status" aria-label={`正在读取${tab}`}>
+    <div className="section-title"><h2>{tab}</h2></div><LoadingRows lines={3} />
+  </section>;
+}
+function CustomerPageSkeleton({ tab }: { tab: string }) {
+  return <>
+    <span className="back"><ArrowLeft size={16} />返回客户档案</span>
+    <section className="customer-hero customer-hero-skeleton" role="status" aria-label="正在读取客户">
+      <div className="person"><span className="skeleton-mark avatar large-avatar" /><div className="skeleton-customer-title"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div></div>
+      <span className="skeleton-line skeleton-hero-action" />
+    </section>
+    <div className="detail-tabs" aria-hidden="true">{customerTabs.map((item) => <button key={item} type="button" disabled className={tab === item ? 'active' : ''}>{item}</button>)}</div>
+    <CustomerDetailSkeleton tab={tab} />
+  </>;
 }
 function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
   const width = 550,
@@ -658,6 +708,7 @@ export default function App() {
     [originPage, setOriginPage] = useState('customers'),
     [followups, setFollowups] = useState<Follow[]>([]),
     [detail, setDetail] = useState<Detail | null>(null),
+    [detailError, setDetailError] = useState(false),
     [removed, setRemoved] = useState<{
       exams: any[];
       fittings: any[];
@@ -724,6 +775,8 @@ export default function App() {
     return true;
   });
   const { page, customer: selected, tab, record: focusedRecord, device: repairDevice } = route;
+  const selectedCustomerRef = useRef(selected);
+  selectedCustomerRef.current = selected;
   const setPage = (page: string) => updateRoute({ page });
   const setSelected = (customer: string | null) => updateRoute({ customer });
   const setTab = (tab: string) => updateRoute({ tab, record: '', device: '' });
@@ -879,17 +932,20 @@ export default function App() {
   }
   const dataReady = (...keys: Dataset[]) => keys.every((key) => dataState[key] === 'ready');
   async function loadDetail(key: string) {
-    setDetail(null);
+    const session = dataSession.current;
+    setDetailError(false);
     try {
-      const [data, removedRows] = await Promise.all([
-        api(`/customers/${key}/detail`),
-        api(`/customers/${key}/removed`),
-      ]);
-      setDetail(data);
-      setRemoved(removedRows);
+      const data = await api(`/customers/${key}/detail`);
+      if (selectedCustomerRef.current === key && session === dataSession.current) setDetail(data);
     } catch (e) {
-      setError((e as Error).message);
+      if (selectedCustomerRef.current === key && session === dataSession.current) {
+        setDetailError(true);
+        setError((e as Error).message);
+      }
     }
+    api(`/customers/${key}/removed`).then((rows) => {
+      if (selectedCustomerRef.current === key && session === dataSession.current) setRemoved(rows);
+    }).catch(() => {});
   }
   useEffect(() => {
     (async () => {
@@ -926,16 +982,16 @@ export default function App() {
     let cancelled = false;
     if (selected && role) {
       setDetail(null);
-      Promise.all([api(`/customers/${selected}/detail`), api(`/customers/${selected}/removed`)])
-        .then(([data, removedRows]) => {
-          if (!cancelled) {
-            setDetail(data);
-            setRemoved(removedRows);
-          }
-        })
+      setDetailError(false);
+      setRemoved({ exams: [], fittings: [], repairs: [], followups: [], attachments: [] });
+      api(`/customers/${selected}/detail`)
+        .then((data) => { if (!cancelled) setDetail(data); })
         .catch((e) => {
-          if (!cancelled) setError(e.message);
+          if (!cancelled) { setDetailError(true); setError(e.message); }
         });
+      api(`/customers/${selected}/removed`)
+        .then((rows) => { if (!cancelled) setRemoved(rows); })
+        .catch(() => {});
       setExamIndex(0);
     }
     return () => {
@@ -1435,12 +1491,7 @@ export default function App() {
       (filter === '全部客户' || c.status === filter) &&
       [c.name, c.phone, c.id].some((v) => v.toLowerCase().includes(search.toLowerCase())),
   );
-  if (boot)
-    return <div className="app-shell cf-shell boot-shell" aria-busy="true">
-      <aside className="sidebar"><div className="brand"><span className="brand-icon"><Ear size={24} /></span><div><b>聆序</b><small>HEARING CARE</small></div></div><div className="boot-side-lines"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div></aside>
-      <main className="main"><header className="topbar" /><div className="content"><div className="page-heading"><h1>查找客户，开始服务</h1></div><div className="boot-search skeleton-surface" aria-label="正在确认账户" /><div className="boot-columns"><LoadingRows lines={4} /><LoadingRows lines={4} /><LoadingRows lines={4} /></div></div></main>
-    </div>;
-  if (!role)
+  if (!role && !boot)
     return (
       <div className="cf-login">
         <header className="cf-login-header">
@@ -1528,7 +1579,7 @@ export default function App() {
         closeEditor={closeEditor}
       />
     ) : null;
-  const customerTable = (list: Customer[], compact = false) => (
+  const customerTable = (list: Customer[], compact = false, loading = false) => (
     <div className="table-scroll">
       <table className="customer-table">
         <thead>
@@ -1542,7 +1593,16 @@ export default function App() {
           </tr>
         </thead>
         <tbody>
-          {list.map((c) => (
+          {loading ? Array.from({ length: compact ? 4 : 5 }, (_, index) => (
+            <tr className="customer-skeleton-row" key={index}>
+              <td><div className="person"><span className="skeleton-mark avatar" /><div className="skeleton-person"><span className="skeleton-line" /><span className="skeleton-line" /></div></div></td>
+              <td><span className="skeleton-line skeleton-table-main" /><span className="skeleton-line skeleton-table-sub" /></td>
+              <td><span className="skeleton-line skeleton-table-status" /></td>
+              <td><span className="skeleton-line skeleton-table-main" /></td>
+              {!compact && <td><span className="skeleton-line skeleton-table-main" /></td>}
+              <td />
+            </tr>
+          )) : list.map((c) => (
             <tr
               key={c.id}
               onClick={() => openCustomer(c.id)}
@@ -1581,7 +1641,7 @@ export default function App() {
           ))}
         </tbody>
       </table>
-      {!list.length && <Empty text="没有找到符合条件的客户" />}
+      {!loading && !list.length && <Empty text="没有找到符合条件的客户" />}
     </div>
   );
   const taskRows = (list: Follow[]) =>
@@ -1738,8 +1798,11 @@ export default function App() {
   };
   return (
     <div
+      aria-busy={boot}
+      inert={boot}
       className={
         'app-shell cf-shell' +
+        (boot ? ' booting' : '') +
         (sidebarCollapsed ? ' sidebar-collapsed' : '') +
         (sidebarHover && sidebarCollapsed ? ' sidebar-peek' : '')
       }
@@ -1762,7 +1825,7 @@ export default function App() {
             </span>
             <div>
               <b>聆序</b>
-              <small>{identity.storeName}</small>
+              {boot ? <small className="skeleton-line boot-store-name" /> : <small>{identity.storeName}</small>}
             </div>
           </div>
           <button
@@ -1777,7 +1840,7 @@ export default function App() {
           </button>
           <nav>
             {navs
-              .filter(([key]) => key !== 'recycle' || role === '店主')
+              .filter(([key]) => key !== 'recycle' || role === '店主' || boot)
               .map(([key, label, Icon]) => (
                 <button
                   key={key}
@@ -1808,9 +1871,9 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              <span className="profile-avatar">{(identity.name || role).slice(0, 1)}</span>
+              <span className="profile-avatar">{boot ? '' : (identity.name || role).slice(0, 1)}</span>
               <div>
-                <strong>{identity.name || role}</strong>
+                <strong>{boot ? <span className="skeleton-line boot-profile-name" /> : identity.name || role}</strong>
                 <small>店主</small>
               </div>
               <ChevronRight size={16} />
@@ -1912,7 +1975,7 @@ export default function App() {
             >
               <Search size={19} />
             </button>
-            {identity.demo && <span className="demo-pill">演示版</span>}
+            {boot ? <span className="skeleton-line boot-demo-pill" /> : identity.demo && <span className="demo-pill">演示版</span>}
             <button
               className="icon-button"
               aria-label="查看待办"
@@ -1929,7 +1992,7 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              {(identity.name || role).slice(0, 1)}
+              {boot ? '' : (identity.name || role).slice(0, 1)}
             </button>
           </div>
         </header>
@@ -1949,7 +2012,7 @@ export default function App() {
             </div>
           )}
           {page === 'accounts' && (
-            <Accounts
+            boot ? <AccountsSkeleton /> : <Accounts
               api={api}
               identity={identity}
               updated={async () => setIdentity(await api('/me'))}
@@ -1967,7 +2030,7 @@ export default function App() {
               <div className="page-heading">
                 <h1>回收站</h1>
               </div>{' '}
-              {role === '店主' && (
+              {(role === '店主' || boot) && (
                 <section className="panel padded space-top">
                   <div className="section-title">
                     <h2>已删除档案</h2>
@@ -2004,19 +2067,21 @@ export default function App() {
             </>
           )}
           {(['devices', 'repairs', 'warranties'] as string[]).includes(page) && (
-            dataReady(page === 'repairs' ? 'repairs' : 'devices', 'customers', ...(page === 'repairs' ? ['devices' as Dataset] : [])) ? <ServiceDirectory
+            <ServiceDirectory
               key={page}
               kind={page as 'devices' | 'repairs' | 'warranties'}
               devices={devices}
               repairs={repairs}
               customers={customers}
-              canEdit={role === '店主'}
+              canEdit={role === '店主' || boot}
+              loading={!dataReady(page === 'repairs' ? 'repairs' : 'devices')}
+              loadError={dataState[page === 'repairs' ? 'repairs' : 'devices'] === 'error' ? dataFallback([page === 'repairs' ? 'repairs' : 'devices']) : undefined}
               open={openCustomer}
               create={(kind, customerId, deviceId) => {
                 openCustomer(customerId, kind === 'repair' ? '维修记录' : '验配记录');
                 openForm(kind, deviceId ? { fittingId: deviceId } : undefined);
               }}
-            /> : <><div className="page-heading"><h1>{page === 'repairs' ? '设备维修' : page === 'warranties' ? '保修提醒' : '验配设备'}</h1></div><section className="panel">{dataFallback(page === 'repairs' ? ['repairs', 'devices', 'customers'] : ['devices', 'customers'], 5)}</section></>
+            />
           )}
           {page === 'intake' && (
             <IntakePage
@@ -2145,7 +2210,7 @@ export default function App() {
                       查看全部 <ArrowRight size={15} />
                     </button>
                   </div>
-                  {dataReady('followups') ? taskRows([...pending].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4)) : dataFallback(['followups'], 3)}
+                  {dataReady('followups') ? taskRows([...pending].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4)) : dataState.followups === 'error' ? dataFallback(['followups']) : <TaskListSkeleton />}
                 </section>
                 <div className="dashboard-side">
                   <section className="panel journey-panel">
@@ -2184,7 +2249,7 @@ export default function App() {
                           </button>
                         );
                       })}
-                    </div> : dataFallback(['customers'], 4)}
+                    </div> : dataState.customers === 'error' ? dataFallback(['customers']) : <JourneySkeleton />}
                   </section>
                 </div>
               </div>
@@ -2197,7 +2262,7 @@ export default function App() {
                     全部客户 <ArrowRight size={15} />
                   </button>
                 </div>
-                {dataReady('customers') ? customerTable(customers.slice(0, 4), true) : dataFallback(['customers'], 4)}
+                {dataReady('customers') ? customerTable(customers.slice(0, 4), true) : dataState.customers === 'error' ? dataFallback(['customers']) : customerTable([], true, true)}
               </section>
             </>
           )}
@@ -2249,7 +2314,7 @@ export default function App() {
                     />
                   </label>
                 </div>
-                {dataReady('customers') ? customerTable(filtered) : dataFallback(['customers'], 5)}
+                {dataReady('customers') ? customerTable(filtered) : dataState.customers === 'error' ? dataFallback(['customers']) : customerTable([], false, true)}
                 {dataReady('customers') && <div className="table-footer">
                   共 {filtered.length} 位客户 <span>点击客户查看完整服务档案</span>
                 </div>}
@@ -2257,7 +2322,7 @@ export default function App() {
             </>
           )}
           {page === 'customers' && selected && !customer && (
-            <><div className="page-heading"><h1>客户档案</h1></div><section className="panel">{dataReady('customers') ? <Empty text="没有找到这位客户" action={<button className="button" onClick={() => navigate('customers')}>返回客户列表</button>} /> : dataFallback(['customers'], 5)}</section></>
+            dataReady('customers') ? <><div className="page-heading"><h1>客户档案</h1></div><section className="panel"><Empty text="没有找到这位客户" action={<button className="button" onClick={() => navigate('customers')}>返回客户列表</button>} /></section></> : dataState.customers === 'error' ? dataFallback(['customers']) : <CustomerPageSkeleton tab={tab} />
           )}
           {page === 'customers' && customer && (
             <>
@@ -2341,7 +2406,7 @@ export default function App() {
                 ))}
               </div>
               {!detail ? (
-                <div className="loading-inline">正在读取档案…</div>
+                detailError ? <div className="data-retry" role="alert"><span>档案详情暂时无法读取</span><button className="button small" onClick={() => void loadDetail(customer.id)}>重试</button></div> : <CustomerDetailSkeleton tab={tab} />
               ) : (
                 <>
                   {tab === '概览' && editorKind === 'customer' && editor}
@@ -3127,7 +3192,7 @@ export default function App() {
                             ? !f.completed && f.due < today()
                             : !f.completed),
                   ),
-                ) : dataFallback(['followups'], 5)}
+                ) : dataState.followups === 'error' ? dataFallback(['followups']) : <TaskListSkeleton lines={5} />}
               </section>
             </>
           )}
@@ -3293,19 +3358,19 @@ export default function App() {
               </div>
               <div className="detail-grid">
                 <section className="panel padded">
-                  <h2>{identity.storeName}</h2>
+                  <h2>{boot ? <span className="skeleton-line account-skeleton-title" /> : identity.storeName}</h2>
                   <dl className="stacked-info">
                     <div>
                       <dt>当前角色</dt>
-                      <dd>{role}</dd>
+                      <dd>{boot ? <span className="skeleton-line account-skeleton-title" /> : role}</dd>
                     </div>
                     <div>
                       <dt>数据空间</dt>
-                      <dd>{identity.storeName}</dd>
+                      <dd>{boot ? <span className="skeleton-line account-skeleton-title" /> : identity.storeName}</dd>
                     </div>
                     <div>
                       <dt>版本</dt>
-                      <dd>{identity.demo ? '本地演示' : '1.0'}</dd>
+                      <dd>{boot ? <span className="skeleton-line account-skeleton-action" /> : identity.demo ? '本地演示' : '1.0'}</dd>
                     </div>
                   </dl>
                   <button className="button full" onClick={() => navigate('accounts')}>
@@ -3332,7 +3397,7 @@ export default function App() {
                   <div className="notice">
                     <ShieldCheck size={20} />
                     <p>
-                      {identity.demo
+                      {boot ? <span className="skeleton-line account-skeleton-subtitle" /> : identity.demo
                         ? '演示环境仅用于虚构数据体验。'
                         : `当前账户：${identity.name}（${identity.email}）。请定期备份数据库及报告附件。`}
                     </p>

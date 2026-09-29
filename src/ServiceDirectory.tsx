@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ArrowRight, Headphones, Plus, Search, ShieldCheck, Users, Wrench, X } from 'lucide-react';
 import { deviceName, deviceSerial, warrantyDays, warrantyLabel } from './workspace';
 
@@ -8,6 +8,8 @@ type Props = {
   repairs: any[];
   customers: { id: string; name: string }[];
   canEdit: boolean;
+  loading?: boolean;
+  loadError?: ReactNode;
   create: (kind: string, customer: string, device?: string) => void;
   open: (customer: string, tab?: string, record?: string, device?: string) => void;
 };
@@ -17,6 +19,8 @@ export function ServiceDirectory({
   repairs,
   customers,
   canEdit,
+  loading = false,
+  loadError,
   create,
   open,
 }: Props) {
@@ -71,7 +75,7 @@ export function ServiceDirectory({
         <div>
           <h1>{repairView ? '设备维修' : warrantyView ? '保修提醒' : '验配设备'}</h1>
           <p>
-            {source.length} 条{repairView ? '维修记录' : '验配记录'}
+            {loading ? <span className="skeleton-line skeleton-table-main" /> : `${source.length} 条${repairView ? '维修记录' : '验配记录'}`}
           </p>
         </div>
         {canEdit && !warrantyView && (
@@ -151,7 +155,14 @@ export function ServiceDirectory({
           </label>
         </div>
         <div className="directory-list">
-          {rows.map((row) => {
+          {loadError || (loading ? <div role="status" aria-label="正在读取记录">{Array.from({ length: 4 }, (_, index) => (
+            <article className="directory-row" key={index}>
+              <span className="resource-icon"><Icon size={21} /></span>
+              <div className="directory-primary skeleton-task-body"><span className="skeleton-line skeleton-task-name" /><span className="skeleton-line skeleton-task-description" /><span className="skeleton-line skeleton-task-date" /></div>
+              <div className="directory-status"><span className="skeleton-line skeleton-task-action" /></div>
+              <div className="directory-actions"><span className="skeleton-line skeleton-task-action" /></div>
+            </article>
+          ))}</div> : rows.map((row) => {
             const device = row.device || row;
             return (
               <article className="directory-row" key={row.id}>
@@ -236,15 +247,15 @@ export function ServiceDirectory({
                 </div>
               </article>
             );
-          })}
-          {!rows.length && (
+          }))}
+          {!loading && !loadError && !rows.length && (
             <div className="empty">
               <Icon size={26} />
               <p>{query ? '没有匹配的记录' : '暂无符合条件的记录'}</p>
             </div>
           )}
         </div>
-        <div className="table-footer">共 {rows.length} 条</div>
+        <div className="table-footer">{loading ? <span className="skeleton-line skeleton-task-date" /> : `共 ${rows.length} 条`}</div>
       </section>
     </>
   );

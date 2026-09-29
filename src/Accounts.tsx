@@ -9,6 +9,35 @@ type Store = { id: string; name: string; current: boolean };
 type Identity = { name: string; email: string; demo: boolean; storeName: string; tenant_id: string };
 type Api = (path: string, method?: string, data?: unknown) => Promise<any>;
 
+function AccountRowsSkeleton({ kind, count = 2 }: { kind: 'store' | 'account'; count?: number }) {
+  return <div role="status" aria-label={kind === 'store' ? '正在读取门店' : '正在读取账户'}>
+    {Array.from({ length: count }, (_, index) => (
+      <div className={kind === 'store' ? 'account-store-row' : 'account-row'} key={index}>
+        <span className="skeleton-mark account-skeleton-icon" />
+        <div className="account-skeleton-copy">
+          <span className="skeleton-line account-skeleton-title" />
+          <span className="skeleton-line account-skeleton-subtitle" />
+        </div>
+        <span className="skeleton-line account-skeleton-action" />
+      </div>
+    ))}
+  </div>;
+}
+
+export function AccountsSkeleton() {
+  return <>
+    <div className="page-heading"><h1>账户管理</h1><button className="button primary" disabled><Plus size={17} />添加店主</button></div>
+    <section className="panel accounts-stores">
+      <div className="account-section-heading"><h2>门店</h2><button className="button" disabled><Plus size={16} />新建门店</button></div>
+      <div className="account-store-list"><AccountRowsSkeleton kind="store" count={1} /></div>
+    </section>
+    <section className="panel accounts-panel">
+      <div className="account-section-heading"><h2><span className="skeleton-line account-skeleton-title" /></h2><span className="skeleton-line account-skeleton-action" /></div>
+      <AccountRowsSkeleton kind="account" count={2} />
+    </section>
+  </>;
+}
+
 export function AccountMenu({
   anchor,
   identity,
@@ -122,6 +151,10 @@ export function Accounts({
 }) {
   const [rows, setRows] = useState<Account[]>([]),
     [stores, setStores] = useState<Store[]>([]),
+    [rowsLoaded, setRowsLoaded] = useState(false),
+    [storesLoaded, setStoresLoaded] = useState(false),
+    [rowsError, setRowsError] = useState(false),
+    [storesError, setStoresError] = useState(false),
     [storeDraft, setStoreDraft] = useState(''),
     [storeMode, setStoreMode] = useState<'new' | 'rename' | ''>(''),
     [draft, setDraft] = useState<Account | null>(null),
@@ -130,13 +163,32 @@ export function Accounts({
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   const initial = useRef('');
+  const loadAccounts = async () => {
+    setRowsError(false);
+    try {
+      setRows(await api('/accounts'));
+      setRowsLoaded(true);
+    } catch (reason) {
+      setRowsError(true);
+      throw reason;
+    }
+  };
+  const loadStores = async () => {
+    setStoresError(false);
+    try {
+      setStores(await api('/accounts/stores'));
+      setStoresLoaded(true);
+    } catch (reason) {
+      setStoresError(true);
+      throw reason;
+    }
+  };
   const load = async () => {
-    const [accounts, storeRows] = await Promise.all([api('/accounts'), api('/accounts/stores')]);
-    setRows(accounts);
-    setStores(storeRows);
+    await Promise.all([loadAccounts(), loadStores()]);
   };
   useEffect(() => {
-    load().catch((e) => setError(e.message));
+    void loadAccounts().catch(() => {});
+    void loadStores().catch(() => {});
     return () => dirty(false);
   }, []);
   useEffect(() => {
@@ -300,7 +352,7 @@ export function Accounts({
           }}><Plus size={16} />新建门店</button>
         </div>
         <div className="account-store-list">
-          {stores.map((store) => (
+          {!storesLoaded ? storesError ? <div className="data-retry" role="alert"><span>门店列表暂时无法读取</span><button className="button small" onClick={() => void loadStores().catch(() => {})}>重试</button></div> : <AccountRowsSkeleton kind="store" count={1} /> : stores.map((store) => (
             <div className="account-store-row" key={store.id}>
               <span className="account-store-icon"><Building2 size={18} strokeWidth={1.6} /></span>
               <div><strong>{store.name}</strong><small>{store.current ? '当前门店' : '独立客户档案'}</small></div>
@@ -331,10 +383,10 @@ export function Accounts({
       <section className="panel accounts-panel">
         <div className="account-section-heading">
           <h2>{identity.storeName}</h2>
-          <span className="muted">{rows.length} 个账户</span>
+          {rowsLoaded ? <span className="muted">{rows.length} 个账户</span> : <span className="skeleton-line account-skeleton-action" />}
         </div>
         {adding && form}
-        {rows.map((row) => (
+        {!rowsLoaded ? rowsError ? <div className="data-retry" role="alert"><span>账户列表暂时无法读取</span><button className="button small" onClick={() => void loadAccounts().catch(() => {})}>重试</button></div> : <AccountRowsSkeleton kind="account" count={2} /> : rows.map((row) => (
           <div className="account-row-wrap" key={row.email}>
             <div className="account-row">
               <span className="account-avatar">
