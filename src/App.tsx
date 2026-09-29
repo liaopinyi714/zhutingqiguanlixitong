@@ -683,7 +683,7 @@ export default function App() {
       }
     }),
     [sidebarHover, setSidebarHover] = useState(false),
-    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力' });
+    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力', tenant_id: '' });
 
   const intakeDirty = useRef(false);
   const accountDirty = useRef(false);
@@ -837,6 +837,20 @@ export default function App() {
       .finally(() => setBoot(false));
   }, []);
   useEffect(() => {
+    if (!role || !identity.tenant_id) return;
+    const mark = () => {
+      if (document.visibilityState === 'visible')
+        api('/accounts/presence', 'POST').catch(() => {});
+    };
+    mark();
+    const timer = window.setInterval(mark, 60000);
+    document.addEventListener('visibilitychange', mark);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', mark);
+    };
+  }, [role, identity.tenant_id]);
+  useEffect(() => {
     let cancelled = false;
     if (selected && role) {
       setDetail(null);
@@ -943,6 +957,18 @@ export default function App() {
     setTaskFilter('待完成');
     setSearch('');
     setError('');
+  }
+  async function switchStore(storeId: string) {
+    if (!canLeaveEditor() || storeId === identity.tenant_id) return;
+    setError('');
+    try {
+      await api('/accounts/stores/' + encodeURIComponent(storeId) + '/switch', 'POST');
+      accountDirty.current = false;
+      window.history.replaceState(null, '', '/#page=overview');
+      window.location.reload();
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
   }
   function openCustomer(key: string, nextTab = '概览', record = '', device = '') {
     if (!canLeaveEditor()) return;
@@ -1830,6 +1856,7 @@ export default function App() {
               api={api}
               identity={identity}
               updated={async () => setIdentity(await api('/me'))}
+              switchStore={switchStore}
               dirty={(value) => {
                 accountDirty.current = value;
               }}
@@ -3209,6 +3236,8 @@ export default function App() {
         <AccountMenu
           anchor={accountAnchor}
           identity={identity}
+          api={api}
+          switchStore={switchStore}
           close={() => setAccountAnchor(null)}
           manage={() => navigate('accounts')}
           logout={async () => {

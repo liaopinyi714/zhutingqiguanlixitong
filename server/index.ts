@@ -45,10 +45,23 @@ app.use('/api/*', async (c, next) => {
     if (!demo) return c.json({ error: '正式环境不支持演示角色登录' }, 403);
     return next();
   }
+  const selectedStore = getCookie(c, 'hearing_store');
+  const mayRecover = c.req.path === '/api/me' ||
+    c.req.path === '/api/accounts/stores' ||
+    /^\/api\/accounts\/stores\/[^/]+\/switch$/.test(c.req.path);
   if (!demo) {
+    const lookup = async (email: string) => {
+      try {
+        return await resolveAccount(c.env, email, false, selectedStore);
+      } catch (error) {
+        if (!selectedStore || !mayRecover || !(error instanceof AuthError)) throw error;
+        deleteCookie(c, 'hearing_store', { path: '/' });
+        return resolveAccount(c.env, email);
+      }
+    };
     c.set(
       'session',
-      await accessSession(c.req.raw, c.env, (email) => resolveAccount(c.env, email)),
+      await accessSession(c.req.raw, c.env, lookup),
     );
     return next();
   }
@@ -59,10 +72,13 @@ app.use('/api/*', async (c, next) => {
         .first<{ role: string; tenant_id: string }>()
     : null;
   if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
-  c.set('session', {
-    ...(await resolveAccount(c.env, 'owner@demo.invalid', true)),
-    tenant_id: s.tenant_id,
-  });
+  try {
+    c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore));
+  } catch (error) {
+    if (!selectedStore || !mayRecover || !(error instanceof AuthError)) throw error;
+    deleteCookie(c, 'hearing_store', { path: '/' });
+    c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true));
+  }
   await next();
 });
 app.use('/api/*', async (c, next) =>
@@ -92,6 +108,7 @@ app.post('/api/login', async (c) => {
 });
 app.get('/api/me', (c) => c.json({ ...c.get('session'), demo: isLocalDemo(c.env, c.req.url) }));
 app.post('/api/logout', async (c) => {
+  deleteCookie(c, 'hearing_store', { path: '/' });
   if (!isLocalDemo(c.env, c.req.url))
     return c.json({ ok: true, logoutUrl: '/cdn-cgi/access/logout' });
   await c.env.DB.prepare('DELETE FROM sessions WHERE token=?')

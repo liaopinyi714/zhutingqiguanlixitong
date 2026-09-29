@@ -24,6 +24,14 @@ async function req(path: string, method = 'GET', data?: any, headers: Record<str
     env,
   );
 }
+async function switchToNewStore() {
+  const created = await req('/accounts/stores', 'POST', { name: '隔离测试门店' });
+  expect(created.status).toBe(201);
+  const { id } = await created.json() as any;
+  const switched = await req('/accounts/stores/' + id + '/switch', 'POST');
+  expect(switched.status).toBe(200);
+  cookie = cookie.split(';')[0] + '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
+}
 beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec(readFileSync('migrations/0001_schema.sql', 'utf8'));
@@ -34,6 +42,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0006_attachment_retention.sql', 'utf8'));
   db.exec(readFileSync('migrations/0008_repairs.sql', 'utf8'));
   db.exec(readFileSync('migrations/0009_accounts.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0010_stores.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -187,13 +196,7 @@ describe('演示 API', () => {
       device: { id: fitting.id },
     });
     const ownerCookie = cookie;
-    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
-      'directory-other-token',
-      '店主',
-      'other-store',
-      Date.now() + 10000,
-    );
-    cookie = 'hearing_session=directory-other-token';
+    await switchToNewStore();
     expect(await (await req('/devices')).json()).toEqual([]);
     expect(await (await req('/repairs')).json()).toEqual([]);
     cookie = ownerCookie;
@@ -664,13 +667,7 @@ describe('演示 API', () => {
     expect(literalPercent).toHaveLength(9);
     expect(literalPercent.every((row) => row.id !== 'demo-4')).toBe(true);
     expect((await req('/search?q=' + encodeURIComponent('听'.repeat(17)))).status).toBe(400);
-    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
-      'other-token',
-      '店主',
-      'other-store',
-      Date.now() + 10000,
-    );
-    cookie = 'hearing_session=other-token';
+    await switchToNewStore();
     expect(await (await req('/search?q=' + encodeURIComponent('陈淑华'))).json()).toEqual([]);
   });
   it('报告上传后仅本门店登录用户可下载', async () => {
@@ -690,13 +687,7 @@ describe('演示 API', () => {
     expect(download.status).toBe(200);
     expect(download.headers.get('Cache-Control')).toBe('private, no-store');
     expect(await download.text()).toContain('%PDF');
-    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
-      'other-token',
-      '店主',
-      'other-store',
-      Date.now() + 10000,
-    );
-    cookie = 'hearing_session=other-token';
+    await switchToNewStore();
     expect((await req('/files/' + id)).status).toBe(404);
     cookie = '';
     expect((await req('/files/' + id)).status).toBe(401);
@@ -779,17 +770,31 @@ describe('演示 API', () => {
     }
   });
   it('其他门店不能读取、修改客户或完成随访', async () => {
-    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
-      'other-token',
-      '店主',
-      'other-store',
-      Date.now() + 10000,
-    );
-    cookie = 'hearing_session=other-token';
+    const created = await req('/accounts/stores', 'POST', { name: '第二门店' });
+    expect(created.status).toBe(201);
+    const { id } = await created.json() as any;
+    const switched = await req('/accounts/stores/' + id + '/switch', 'POST');
+    expect(switched.status).toBe(200);
+    cookie += '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
     expect(await (await req('/customers')).json()).toEqual([]);
     expect((await req('/customers/demo-1/detail')).status).toBe(404);
     expect((await req('/customers/demo-1/profile', 'PUT', {})).status).toBe(404);
     expect((await req('/followups/demo-1-follow', 'PUT', { result: '测试' })).status).toBe(404);
+  });
+  it('门店名称与账户状态按门店保存，切换后只读取当前门店', async () => {
+    expect((await req('/accounts/presence', 'POST')).status).toBe(200);
+    expect(((await (await req('/accounts')).json()) as any[])[0].online).toBe(true);
+    expect((await req('/accounts/stores/demo-store', 'PATCH', { name: '新名称' })).status).toBe(200);
+    expect(((await (await req('/me')).json()) as any).storeName).toBe('新名称');
+    const created = await req('/accounts/stores', 'POST', { name: '分店' });
+    const { id } = await created.json() as any;
+    const switched = await req('/accounts/stores/' + id + '/switch', 'POST');
+    cookie += '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
+    expect(((await (await req('/me')).json()) as any).tenant_id).toBe(id);
+    expect(await (await req('/customers')).json()).toEqual([]);
+    expect((await req('/customers/demo-1/detail')).status).toBe(404);
+    expect(((await (await req('/accounts/stores')).json()) as any[]).map((s) => s.name))
+      .toEqual(['分店', '新名称']);
   });
   it('Excel 数据只包含本门店有效档案，最新听力排除误删检查，关联记录随客户隐藏', async () => {
     db.prepare('INSERT INTO exams(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)').run(
@@ -816,13 +821,7 @@ describe('演示 API', () => {
         after[key].some((row: any) => row.id === 'demo-1' || row.customer_id === 'demo-1'),
       ).toBe(false);
     }
-    db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(
-      'another-store-export',
-      '店主',
-      'other-store',
-      Date.now() + 10000,
-    );
-    cookie = 'hearing_session=another-store-export';
+    await switchToNewStore();
     expect(((await (await req('/export/spreadsheet')).json()) as any).customers).toEqual([]);
     cookie = '';
     expect((await req('/export/spreadsheet')).status).toBe(401);

@@ -229,7 +229,7 @@ describe('正式环境', () => {
     env.STAFF_ACCOUNTS = JSON.stringify([{ ...owner, email: 'replacement@example.com' }]);
     expect((await req('/me', jwt)).status).toBe(403);
   });
-  it('账户管理按门店隔离，不能抢占其他门店邮箱，拒绝未授权和无效提交', async () => {
+  it('账户可以获授权访问多店，未经授权不能切换，门店档案仍隔离', async () => {
     const jwt = await token();
     const other = {
       ...owner,
@@ -238,20 +238,41 @@ describe('正式环境', () => {
       storeName: '另一门店',
     };
     env.STAFF_ACCOUNTS = JSON.stringify([owner, other]);
-    expect(
-      (await req('/accounts', jwt, 'PUT', { email: other.email, name: '抢占', enabled: true }))
-        .status,
-    ).toBe(409);
+    const customer = (await (await req('/customers', jwt, 'POST', profile)).json()) as any;
+    const otherJwt = await token({ email: other.email });
+    expect((await req('/customers/' + customer.id + '/detail', otherJwt)).status).toBe(404);
+    expect((await req('/accounts/stores/store-001/switch', otherJwt, 'POST')).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', {
+      email: other.email, name: other.name, enabled: true,
+    })).status).toBe(200);
     expect(
       (await req('/accounts', jwt, 'PUT', { email: 'bad', name: '', enabled: true })).status,
     ).toBe(400);
     const managed = { email: 'managed@example.com', name: '店主二', enabled: true };
     expect((await req('/accounts', jwt, 'PUT', managed)).status).toBe(200);
-    const otherJwt = await token({ email: other.email });
     expect(
       ((await (await req('/accounts', otherJwt)).json()) as any[]).map((a) => a.email),
     ).toEqual([other.email]);
-    expect((await req('/accounts', otherJwt, 'PUT', managed)).status).toBe(409);
+    expect((await req('/accounts', otherJwt, 'PUT', managed)).status).toBe(200);
+    const managedJwt = await token({ email: managed.email });
+    expect(((await (await req('/accounts/stores', managedJwt)).json()) as any[])
+      .map((store) => store.id).sort()).toEqual(['store-001', 'store-002']);
+    expect((await req('/accounts/stores/store-002/switch', managedJwt, 'POST')).status).toBe(200);
+    const switched = await req('/accounts/stores/store-001/switch', otherJwt, 'POST');
+    expect(switched.status).toBe(200);
+    const selected = switched.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined,
+      { Cookie: selected })).status).toBe(200);
+    expect((await req('/accounts', otherJwt, 'PUT',
+      { email: other.email, name: other.name, enabled: false },
+      { Cookie: selected })).status).toBe(400);
+    expect((await req('/accounts', jwt, 'PUT', {
+      email: other.email, name: other.name, enabled: false,
+    })).status).toBe(200);
+    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined,
+      { Cookie: selected })).status).toBe(403);
+    expect(((await (await req('/me', otherJwt, 'GET', undefined,
+      { Cookie: selected })).json()) as any).tenant_id).toBe('store-002');
     expect((await req('/accounts')).status).toBe(401);
     expect(
       (await req('/accounts', await token({ email: 'stranger@example.com' }), 'PUT', managed))

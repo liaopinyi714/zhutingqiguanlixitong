@@ -1,27 +1,37 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronRight, LogOut, Pencil, Plus, UserRound, Users } from 'lucide-react';
+import { Building2, Check, ChevronRight, LogOut, Pencil, Plus, UserRound, Users } from 'lucide-react';
 
-type Account = { email: string; name: string; enabled: boolean; self: boolean };
-type Identity = { name: string; email: string; demo: boolean; storeName: string };
+type Account = {
+  email: string; name: string; enabled: boolean; self: boolean;
+  online: boolean; lastSeenAt: number | null;
+};
+type Store = { id: string; name: string; current: boolean };
+type Identity = { name: string; email: string; demo: boolean; storeName: string; tenant_id: string };
 type Api = (path: string, method?: string, data?: unknown) => Promise<any>;
 
 export function AccountMenu({
   anchor,
   identity,
+  api,
+  switchStore,
   close,
   manage,
   logout,
 }: {
   anchor: HTMLElement;
   identity: Identity;
+  api: Api;
+  switchStore: (storeId: string) => Promise<void>;
   close: () => void;
   manage: () => void;
   logout: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const [stores, setStores] = useState<Store[]>([]);
   const rect = anchor.getBoundingClientRect();
   const bottom = rect.top > window.innerHeight / 2;
   useEffect(() => {
+    api('/accounts/stores').then(setStores).catch(() => {});
     ref.current?.querySelector('button')?.focus();
     const outside = (event: PointerEvent) => {
       if (!ref.current?.contains(event.target as Node) && !anchor.contains(event.target as Node))
@@ -68,6 +78,20 @@ export function AccountMenu({
           <small>{identity.email}</small>
         </div>
       </div>
+      {stores.length > 1 && (
+        <div className="account-menu-stores">
+          <small>切换门店</small>
+          {stores.map((store) => (
+            <button key={store.id} className={store.current ? 'current' : ''}
+              disabled={store.current}
+              onClick={() => { close(); void switchStore(store.id); }}>
+              <Building2 size={16} />
+              <span>{store.name}</span>
+              {store.current && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      )}
       <button onClick={manage}>
         <Users size={17} />
         <span>账户管理</span>
@@ -85,28 +109,80 @@ export function Accounts({
   api,
   identity,
   updated,
+  switchStore,
   dirty,
   saving,
 }: {
   api: Api;
   identity: Identity;
   updated: () => Promise<void>;
+  switchStore: (storeId: string) => Promise<void>;
   dirty: (value: boolean) => void;
   saving: (value: boolean) => void;
 }) {
   const [rows, setRows] = useState<Account[]>([]),
+    [stores, setStores] = useState<Store[]>([]),
+    [storeDraft, setStoreDraft] = useState(''),
+    [storeMode, setStoreMode] = useState<'new' | 'rename' | ''>(''),
     [draft, setDraft] = useState<Account | null>(null),
     [adding, setAdding] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   const initial = useRef('');
-  const load = async () => setRows(await api('/accounts'));
+  const load = async () => {
+    const [accounts, storeRows] = await Promise.all([api('/accounts'), api('/accounts/stores')]);
+    setRows(accounts);
+    setStores(storeRows);
+  };
   useEffect(() => {
     load().catch((e) => setError(e.message));
     return () => dirty(false);
   }, []);
-  useEffect(() => dirty(!!draft && JSON.stringify(draft) !== initial.current), [draft]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') load().catch(() => {});
+    }, 30000);
+    return () => window.clearInterval(timer);
+  }, []);
+  useEffect(() => dirty(
+    (!!draft && JSON.stringify(draft) !== initial.current) ||
+    (!!storeMode && storeDraft.trim() !== (storeMode === 'rename' ? identity.storeName : '')),
+  ), [draft, storeDraft, storeMode, identity.storeName]);
+  async function saveStore(event: React.FormEvent) {
+    event.preventDefault();
+    const name = storeDraft.trim();
+    if (!name) return;
+    if (storeMode === 'new' && draft && JSON.stringify(draft) !== initial.current) {
+      if (!window.confirm('放弃尚未保存的账户修改并进入新门店？')) return;
+      setDraft(null);
+    }
+    setBusy(true);
+    saving(true);
+    setError('');
+    try {
+      if (storeMode === 'new') {
+        const created = await api('/accounts/stores', 'POST', { name });
+        setStoreMode('');
+        dirty(false);
+        saving(false);
+        setBusy(false);
+        await switchStore(created.id);
+      } else {
+        await api('/accounts/stores/' + encodeURIComponent(identity.tenant_id), 'PATCH', { name });
+        setStoreMode('');
+        dirty(false);
+        await updated();
+        await load();
+        setNotice('门店名称已更新');
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+      saving(false);
+    }
+  }
   function edit(value: Account, isNew = false) {
     if (
       draft &&
@@ -202,7 +278,7 @@ export function Accounts({
         <button
           className="button primary"
           disabled={busy}
-          onClick={() => edit({ email: '', name: '', enabled: true, self: false }, true)}
+          onClick={() => edit({ email: '', name: '', enabled: true, self: false, online: false, lastSeenAt: null }, true)}
         >
           <Plus size={17} />
           添加店主
@@ -214,10 +290,48 @@ export function Accounts({
         </div>
       )}
       {notice && <p role="status">{notice}</p>}
+      <section className="panel accounts-stores">
+        <div className="account-section-heading">
+          <h2>门店</h2>
+          <button className="button" disabled={busy} onClick={() => {
+            setStoreDraft('');
+            setStoreMode('new');
+            setNotice('');
+          }}><Plus size={16} />新建门店</button>
+        </div>
+        <div className="account-store-list">
+          {stores.map((store) => (
+            <div className="account-store-row" key={store.id}>
+              <span className="account-store-icon"><Building2 size={18} strokeWidth={1.6} /></span>
+              <div><strong>{store.name}</strong><small>{store.current ? '当前门店' : '独立客户档案'}</small></div>
+              {store.current
+                ? <button className="icon-button" aria-label="修改门店名称" title="修改门店名称"
+                    disabled={busy} onClick={() => {
+                      setStoreDraft(store.name);
+                      setStoreMode('rename');
+                    }}><Pencil size={16} /></button>
+                : <button className="button" disabled={busy} onClick={() => void switchStore(store.id)}>切换</button>}
+            </div>
+          ))}
+        </div>
+        {storeMode && <form className="account-store-form" onSubmit={saveStore}>
+          <label>{storeMode === 'new' ? '新门店名称' : '门店名称'}
+            <input autoFocus maxLength={80} required value={storeDraft}
+              onChange={(event) => setStoreDraft(event.target.value)} />
+          </label>
+          <button className="button" type="button" disabled={busy} onClick={() => {
+            setStoreMode('');
+            dirty(false);
+          }}>取消</button>
+          <button className="button primary" disabled={busy}>
+            {busy ? '保存中…' : storeMode === 'new' ? '创建并进入' : '保存名称'}
+          </button>
+        </form>}
+      </section>
       <section className="panel accounts-panel">
         <div className="account-section-heading">
           <h2>{identity.storeName}</h2>
-          <span className="muted">{rows.length} 个账户 · 店主</span>
+          <span className="muted">{rows.length} 个账户</span>
         </div>
         {adding && form}
         {rows.map((row) => (
@@ -233,8 +347,8 @@ export function Accounts({
                 </strong>
                 <span>{row.email}</span>
               </button>
-              <span className={'account-state' + (!row.enabled ? ' disabled' : '')}>
-                {row.enabled ? '已启用' : '已停用'}
+              <span className={'account-state' + (!row.enabled ? ' disabled' : row.online ? ' online' : '')}>
+                <i />{!row.enabled ? '已停用' : row.online ? '在线' : '离线'}
               </span>
               <button
                 className="icon-button"
@@ -268,7 +382,7 @@ export function Accounts({
       <p className="account-help">
         {identity.demo
           ? '演示账户仅用于本地体验。'
-          : '所有账户均为店主，可管理完整档案和其他账户。新增邮箱还需加入 Cloudflare Access 的允许登录名单。登录验证由 Cloudflare Access 提供。'}
+          : '新增账户需同时加入 Cloudflare Access 的允许登录名单。在线表示最近 2 分半钟内在当前门店有活动。'}
       </p>
     </>
   );

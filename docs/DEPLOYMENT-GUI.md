@@ -49,7 +49,7 @@ R2 有免费额度，但超过免费额度会按量收费；开通页面可能�
 [{"email":"你用于登录的邮箱@example.com","name":"你的姓名","role":"店主","tenantId":"store-001","storeName":"你的助听器门店"}]
 ```
 
-示例中的邮箱是占位符，必须替换为真实邮箱。`role` 填 `店主`。初始店主配置成功后，点击网站头像 → 账户管理即可添加其他店主，不再需要为每个账户编辑 Secret。配置中同一门店的 `tenantId` 和 `storeName` 保持相同。`tenantId` 是数据归属标识，正式使用后不要随意改变。员工邮箱还必须同时出现在上一步的 Access Allow 策略中。
+示例中的邮箱是占位符，必须替换为真实邮箱。`role` 填 `店主`。初始店主配置成功后，点击网站头像 → 账户管理可修改当前门店名称、新建门店、切换门店，以及为当前门店添加店主。同一邮箱可在多个门店分别添加并切换使用。新增邮箱仍需加入 Access Allow 策略。`tenantId` 是初始门店的数据归属标识，正式使用后不要随意改变。
 
 **Secret 要加在 Worker 的运行时 Variables and Secrets 页面，不要加在 Builds 的 Build Variables 页面，也不要提交到 GitHub。** 创建后保存/部署 Secret。后续代码发布会保留该 Secret。
 
