@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { frequencies, pta } from '../server/domain';
 import { HearingEditor } from './HearingEditor';
+import { RequestOrder } from './requestOrder';
 import { Field, FittingDeviceFields } from './Fields';
 import { RecordEditor } from './RecordEditor';
 import { Accounts, AccountsSkeleton, AccountMenu } from './Accounts';
@@ -766,6 +767,7 @@ export default function App() {
   const accountDirty = useRef(false);
   const accountBusy = useRef(false);
   const dataSession = useRef(0);
+  const requestOrder = useRef(new RequestOrder());
   const draftSnapshot = useRef('');
   const { route, update: updateRoute } = useWorkspaceRoute(() => {
     if (!canLeaveEditor()) return false;
@@ -870,23 +872,37 @@ export default function App() {
     setTimeout(() => setToast(''), 3500);
   };
   async function refresh(includeRemoved = role === '店主') {
+    const session = dataSession.current;
+    const keys: Dataset[] = ['customers', 'followups', 'devices', 'repairs', 'removed'];
+    const guards = Object.fromEntries(keys.map((key) => [key, requestOrder.current.begin(key)]));
     const [a, b, warrantyRows, removedRows, repairRows] = await Promise.all([
       api('/customers'),
       api('/followups'),
       api('/devices'),
       includeRemoved ? api('/customers/removed') : Promise.resolve([]),
       api('/repairs'),
-    ]);
-    setCustomers(a);
-    setFollowups(b);
-    setDevices(warrantyRows);
-    setRepairs(repairRows);
-    setRemovedCustomers(removedRows);
-    setDataState({
-      customers: 'ready', followups: 'ready', devices: 'ready', repairs: 'ready', removed: 'ready',
+    ]).catch((error) => {
+      if (session === dataSession.current) setDataState((current) => {
+        const next = { ...current };
+        for (const key of keys) if (guards[key]()) next[key] = 'error';
+        return next;
+      });
+      throw error;
+    });
+    if (session !== dataSession.current) return;
+    if (guards.customers()) setCustomers(a);
+    if (guards.followups()) setFollowups(b);
+    if (guards.devices()) setDevices(warrantyRows);
+    if (guards.repairs()) setRepairs(repairRows);
+    if (guards.removed()) setRemovedCustomers(removedRows);
+    setDataState((current) => {
+      const next = { ...current };
+      for (const key of keys) if (guards[key]()) next[key] = 'ready';
+      return next;
     });
   }
   function loadDataset(key: Dataset, session = dataSession.current) {
+    const isLatest = requestOrder.current.begin(key);
     const paths: Record<Dataset, string> = {
       customers: '/customers',
       followups: '/followups',
@@ -897,7 +913,7 @@ export default function App() {
     setDataState((current) => ({ ...current, [key]: 'loading' }));
     api(paths[key])
       .then((rows) => {
-        if (session !== dataSession.current) return;
+        if (session !== dataSession.current || !isLatest()) return;
         if (key === 'customers') setCustomers(rows);
         if (key === 'followups') setFollowups(rows);
         if (key === 'devices') setDevices(rows);
@@ -906,7 +922,7 @@ export default function App() {
         setDataState((current) => ({ ...current, [key]: 'ready' }));
       })
       .catch(() => {
-        if (session === dataSession.current)
+        if (session === dataSession.current && isLatest())
           setDataState((current) => ({ ...current, [key]: 'error' }));
       });
   }
@@ -948,8 +964,10 @@ export default function App() {
     }).catch(() => {});
   }
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       const [configResult, identityResult] = await Promise.allSettled([api('/config'), api('/me')]);
+      if (cancelled) return;
       const demo = configResult.status === 'fulfilled' && configResult.value.demo;
       setIdentity((previous) => ({ ...previous, demo }));
       if (identityResult.status === 'fulfilled') {
@@ -961,8 +979,9 @@ export default function App() {
         setError((identityResult.reason as Error).message);
       }
     })()
-      .catch((reason) => setError((reason as Error).message))
-      .finally(() => setBoot(false));
+      .catch((reason) => { if (!cancelled) setError((reason as Error).message); })
+      .finally(() => { if (!cancelled) setBoot(false); });
+    return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     if (!role || !identity.tenant_id) return;
