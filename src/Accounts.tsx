@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
-import { Building2, Check, ChevronRight, LogOut, Pencil, Plus, UserRound, Users } from 'lucide-react';
+import { Building2, Check, ChevronRight, LogOut, Pencil, Plus, RotateCcw, Trash2, Upload, Users } from 'lucide-react';
+import { AccountAvatar, avatarThumbnail } from './AccountAvatar';
+import { RequestOrder } from './requestOrder';
 
 type Account = {
   email: string; name: string; enabled: boolean; self: boolean;
   online: boolean; lastSeenAt: number | null;
+  avatar?: string;
 };
 type Store = { id: string; name: string; current: boolean };
-type Identity = { name: string; email: string; demo: boolean; storeName: string; tenant_id: string };
+type Identity = { name: string; email: string; demo: boolean; storeName: string; tenant_id: string; avatar?: string };
 type Api = (path: string, method?: string, data?: unknown) => Promise<any>;
 
 function AccountRowsSkeleton({ kind, count = 2 }: { kind: 'store' | 'account'; count?: number }) {
@@ -99,9 +102,7 @@ export function AccountMenu({
       }}
     >
       <div className="account-menu-heading">
-        <span className="account-avatar">
-          <UserRound size={18} />
-        </span>
+        <AccountAvatar avatar={identity.avatar} name={identity.name} />
         <div>
           <strong>{identity.name || '店主'}</strong>
           <small>{identity.email}</small>
@@ -157,29 +158,40 @@ export function Accounts({
     [storesError, setStoresError] = useState(false),
     [storeDraft, setStoreDraft] = useState(''),
     [storeMode, setStoreMode] = useState<'new' | 'rename' | ''>(''),
+    [removedStores, setRemovedStores] = useState<(Store & { deleted_at: string })[]>([]),
+    [deleteStoreName, setDeleteStoreName] = useState<string | null>(null),
+    [avatarBusy, setAvatarBusy] = useState(false),
     [draft, setDraft] = useState<Account | null>(null),
     [adding, setAdding] = useState(false),
     [busy, setBusy] = useState(false),
     [error, setError] = useState(''),
     [notice, setNotice] = useState('');
   const initial = useRef('');
+  const requestOrder = useRef(new RequestOrder());
   const loadAccounts = async () => {
+    const isLatest = requestOrder.current.begin('accounts');
     setRowsError(false);
     try {
-      setRows(await api('/accounts'));
+      const accounts = await api('/accounts');
+      if (!isLatest()) return;
+      setRows(accounts);
       setRowsLoaded(true);
     } catch (reason) {
-      setRowsError(true);
+      if (isLatest()) setRowsError(true);
       throw reason;
     }
   };
   const loadStores = async () => {
+    const isLatest = requestOrder.current.begin('stores');
     setStoresError(false);
     try {
-      setStores(await api('/accounts/stores'));
+      const [active, removed] = await Promise.all([api('/accounts/stores'), api('/accounts/stores/removed')]);
+      if (!isLatest()) return;
+      setStores(active);
+      setRemovedStores(removed);
       setStoresLoaded(true);
     } catch (reason) {
-      setStoresError(true);
+      if (isLatest()) setStoresError(true);
       throw reason;
     }
   };
@@ -189,7 +201,11 @@ export function Accounts({
   useEffect(() => {
     void loadAccounts().catch(() => {});
     void loadStores().catch(() => {});
-    return () => dirty(false);
+    return () => {
+      requestOrder.current.begin('accounts');
+      requestOrder.current.begin('stores');
+      dirty(false);
+    };
   }, []);
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -199,10 +215,48 @@ export function Accounts({
   }, []);
   useEffect(() => dirty(
     (!!draft && JSON.stringify(draft) !== initial.current) ||
+    deleteStoreName !== null ||
     (!!storeMode && storeDraft.trim() !== (storeMode === 'rename' ? identity.storeName : '')),
-  ), [draft, storeDraft, storeMode, identity.storeName]);
+  ), [draft, storeDraft, storeMode, identity.storeName, deleteStoreName]);
+  async function removeStore(event: React.FormEvent) {
+    event.preventDefault();
+    if (avatarBusy) return;
+    setBusy(true);
+    saving(true);
+    setError('');
+    try {
+      const result = await api('/accounts/stores/' + encodeURIComponent(identity.tenant_id), 'DELETE', { name: deleteStoreName });
+      setDeleteStoreName(null);
+      setDraft(null);
+      setStoreMode('');
+      dirty(false);
+      saving(false);
+      await switchStore(result.nextStoreId);
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+      saving(false);
+    }
+  }
+  async function restoreStore(store: Store) {
+    setBusy(true);
+    saving(true);
+    setError('');
+    try {
+      await api('/accounts/stores/' + encodeURIComponent(store.id) + '/restore', 'POST');
+      await loadStores();
+      setNotice('门店已恢复');
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setBusy(false);
+      saving(false);
+    }
+  }
   async function saveStore(event: React.FormEvent) {
     event.preventDefault();
+    if (avatarBusy) return;
     const name = storeDraft.trim();
     if (!name) return;
     if (storeMode === 'new' && draft && JSON.stringify(draft) !== initial.current) {
@@ -259,6 +313,7 @@ export function Accounts({
     dirty(false);
   }
   async function save(value: Account) {
+    if (avatarBusy) return;
     if (
       value !== draft &&
       draft &&
@@ -276,7 +331,7 @@ export function Accounts({
       dirty(false);
       await load();
       await updated();
-      setNotice('账户已保存');
+      setNotice(adding && !identity.demo ? '店主已添加到当前门店。请同时在 Cloudflare Access 中允许该邮箱登录。' : '账户已保存');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -292,6 +347,28 @@ export function Accounts({
         save(draft);
       }}
     >
+      <div className="account-avatar-editor">
+        <AccountAvatar avatar={draft.avatar} name={draft.name} />
+        <label className={'button small avatar-upload' + (busy || avatarBusy ? ' disabled' : '')}>
+          <Upload size={15} />{avatarBusy ? '处理图片…' : draft.avatar ? '更换头像' : '添加头像'}
+          <input type="file" accept="image/jpeg,image/png,image/webp" disabled={busy || avatarBusy}
+            onChange={async (event) => {
+              const file = event.currentTarget.files?.[0];
+              event.currentTarget.value = '';
+              if (!file) return;
+              setAvatarBusy(true);
+              saving(true);
+              setError('');
+              try {
+                const avatar = await avatarThumbnail(file);
+                setDraft((current) => current ? { ...current, avatar } : current);
+              } catch (reason) { setError((reason as Error).message); }
+              finally { setAvatarBusy(false); saving(false); }
+            }} />
+        </label>
+        {draft.avatar && <button type="button" className="icon-button" disabled={busy || avatarBusy}
+          title="移除头像" aria-label="移除头像" onClick={() => setDraft({ ...draft, avatar: '' })}><Trash2 size={16} /></button>}
+      </div>
       <label>
         名称
         <input
@@ -314,10 +391,10 @@ export function Accounts({
         />
       </label>
       <div className="account-form-actions">
-        <button type="button" className="button" disabled={busy} onClick={cancel}>
+        <button type="button" className="button" disabled={busy || avatarBusy} onClick={cancel}>
           取消
         </button>
-        <button className="button primary" disabled={busy}>
+        <button className="button primary" disabled={busy || avatarBusy}>
           {busy ? '保存中…' : '保存'}
         </button>
       </div>
@@ -329,7 +406,7 @@ export function Accounts({
         <h1>账户管理</h1>
         <button
           className="button primary"
-          disabled={busy}
+          disabled={busy || avatarBusy}
           onClick={() => edit({ email: '', name: '', enabled: true, self: false, online: false, lastSeenAt: null }, true)}
         >
           <Plus size={17} />
@@ -345,9 +422,10 @@ export function Accounts({
       <section className="panel accounts-stores">
         <div className="account-section-heading">
           <h2>门店</h2>
-          <button className="button" disabled={busy} onClick={() => {
+          <button className="button" disabled={busy || avatarBusy} onClick={() => {
             setStoreDraft('');
             setStoreMode('new');
+            setDeleteStoreName(null);
             setNotice('');
           }}><Plus size={16} />新建门店</button>
         </div>
@@ -358,41 +436,61 @@ export function Accounts({
               <div><strong>{store.name}</strong><small>{store.current ? '当前门店' : '独立客户档案'}</small></div>
               {store.current
                 ? <button className="icon-button" aria-label="修改门店名称" title="修改门店名称"
-                    disabled={busy} onClick={() => {
+                    disabled={busy || avatarBusy} onClick={() => {
                       setStoreDraft(store.name);
                       setStoreMode('rename');
+                      setDeleteStoreName(null);
                     }}><Pencil size={16} /></button>
-                : <button className="button" disabled={busy} onClick={() => void switchStore(store.id)}>切换</button>}
+                : <button className="button" disabled={busy || avatarBusy} onClick={() => void switchStore(store.id)}>切换</button>}
+              {store.current && <button className="icon-button" title={stores.length < 2 ? '不能删除唯一可进入的门店' : '删除门店'} aria-label="删除门店" disabled={busy || avatarBusy || stores.length < 2}
+                onClick={() => { setDeleteStoreName(''); setStoreMode(''); setError(''); }}><Trash2 size={16} /></button>}
             </div>
           ))}
         </div>
+        {deleteStoreName !== null && <form className="account-store-delete" onSubmit={removeStore}>
+          <p>删除后，所有账户将无法进入这家门店。客户和业务资料保留 30 天，可在下方恢复门店；到期后自动清理。</p>
+          <label>输入“{identity.storeName}”确认删除
+            <input autoFocus value={deleteStoreName} maxLength={80} disabled={busy || avatarBusy}
+              onChange={(event) => setDeleteStoreName(event.target.value)} />
+          </label>
+          <div className="account-form-actions">
+            <button type="button" className="button" disabled={busy || avatarBusy} onClick={() => setDeleteStoreName(null)}>取消</button>
+            <button className="button danger" disabled={busy || avatarBusy || deleteStoreName.trim() !== identity.storeName}>{busy ? '删除中…' : '删除门店'}</button>
+          </div>
+        </form>}
         {storeMode && <form className="account-store-form" onSubmit={saveStore}>
           <label>{storeMode === 'new' ? '新门店名称' : '门店名称'}
             <input autoFocus maxLength={80} required value={storeDraft}
               onChange={(event) => setStoreDraft(event.target.value)} />
           </label>
-          <button className="button" type="button" disabled={busy} onClick={() => {
+          <button className="button" type="button" disabled={busy || avatarBusy} onClick={() => {
             setStoreMode('');
             dirty(false);
           }}>取消</button>
-          <button className="button primary" disabled={busy}>
+          <button className="button primary" disabled={busy || avatarBusy}>
             {busy ? '保存中…' : storeMode === 'new' ? '创建并进入' : '保存名称'}
           </button>
         </form>}
+        {removedStores.length > 0 && <details className="account-removed-stores">
+          <summary>已删除门店 <span className="muted">{removedStores.length}</span></summary>
+          {removedStores.map((store) => <div className="account-store-row" key={store.id}>
+            <span className="account-store-icon"><Building2 size={18} /></span>
+            <div><strong>{store.name}</strong><small>{store.deleted_at.slice(0, 10)} 删除 · 30 天内可恢复</small></div>
+            <button className="button small" disabled={busy || avatarBusy} onClick={() => void restoreStore(store)}><RotateCcw size={15} />恢复</button>
+          </div>)}
+        </details>}
       </section>
       <section className="panel accounts-panel">
         <div className="account-section-heading">
           <h2>{identity.storeName}</h2>
           {rowsLoaded ? <span className="muted">{rows.length} 个账户</span> : <span className="skeleton-line account-skeleton-action" />}
         </div>
-        {adding && form}
+        {adding && <div><p className="account-new-hint">添加至 {identity.storeName} · 已有账户可填写同一个登录邮箱</p>{form}</div>}
         {!rowsLoaded ? rowsError ? <div className="data-retry" role="alert"><span>账户列表暂时无法读取</span><button className="button small" onClick={() => void loadAccounts().catch(() => {})}>重试</button></div> : <AccountRowsSkeleton kind="account" count={2} /> : rows.map((row) => (
           <div className="account-row-wrap" key={row.email}>
             <div className="account-row">
-              <span className="account-avatar">
-                <UserRound size={19} />
-              </span>
-              <button className="account-identity" disabled={busy} onClick={() => edit(row)}>
+              <AccountAvatar avatar={row.avatar} name={row.name} />
+              <button className="account-identity" disabled={busy || avatarBusy} onClick={() => edit(row)}>
                 <strong>
                   {row.name}
                   {row.self && <small>我</small>}
@@ -405,7 +503,7 @@ export function Accounts({
               <button
                 className="icon-button"
                 aria-label={`编辑${row.name}`}
-                disabled={busy}
+                disabled={busy || avatarBusy}
                 onClick={() => edit(row)}
               >
                 <Pencil size={16} />
@@ -413,7 +511,7 @@ export function Accounts({
               {!row.self && (
                 <button
                   className="button"
-                  disabled={busy}
+                  disabled={busy || avatarBusy}
                   onClick={() => {
                     if (
                       window.confirm(

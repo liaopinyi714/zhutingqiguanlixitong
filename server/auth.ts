@@ -14,6 +14,7 @@ export type Session = {
   name: string;
   email?: string;
   storeName: string;
+  avatar?: string;
 };
 export class AuthError extends Error {
   status: 401 | 403 | 503;

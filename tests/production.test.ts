@@ -114,6 +114,35 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  it('门店删除立即撤销同事已有 JWT 的访问，其他门店不能恢复该店', async () => {
+    const jwt = await token();
+    const created = await (await req('/accounts/stores', jwt, 'POST', { name: '新门店' })).json() as any;
+    const switched = await req('/accounts/stores/' + created.id + '/switch', jwt, 'POST');
+    const selected = switched.headers.get('Set-Cookie')!.split(';')[0];
+    const colleague = { email: 'colleague@example.com', name: '同事', enabled: true };
+    expect((await req('/accounts', jwt, 'PUT', colleague, { Cookie: selected })).status).toBe(200);
+    const colleagueJwt = await token({ email: colleague.email });
+    expect((await req('/me', colleagueJwt)).status).toBe(200);
+    const deleted = await req('/accounts/stores/' + created.id, jwt, 'DELETE', { name: '新门店' }, { Cookie: selected });
+    expect(deleted.status).toBe(200);
+    expect((await req('/me', colleagueJwt)).status).toBe(403);
+    expect((await req('/customers', colleagueJwt)).status).toBe(403);
+    const outsider = { ...owner, email: 'other@example.com', tenantId: 'other-store', storeName: '另一门店' };
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, outsider]);
+    const outsiderJwt = await token({ email: outsider.email });
+    expect(await (await req('/accounts/stores/removed', outsiderJwt)).json()).toEqual([]);
+    expect((await req('/accounts/stores/' + created.id + '/restore', outsiderJwt, 'POST')).status).toBe(404);
+    expect((await req('/accounts/stores/' + created.id + '/restore', jwt, 'POST')).status).toBe(200);
+    expect((await req('/me', colleagueJwt)).status).toBe(200);
+  });
+  it('初始配置指向的门店删除后不会由 STAFF_ACCOUNTS 自动重建', async () => {
+    const jwt = await token();
+    await req('/accounts/presence', jwt, 'POST');
+    await req('/accounts/stores', jwt, 'POST', { name: '保留门店' });
+    expect((await req('/accounts/stores/' + owner.tenantId, jwt, 'DELETE', { name: owner.storeName })).status).toBe(200);
+    expect((await (await req('/me', jwt)).json() as any).tenant_id).not.toBe(owner.tenantId);
+    expect((await (await req('/accounts/stores', jwt)).json() as any[]).some((row) => row.id === owner.tenantId)).toBe(false);
+  });
   it('新数据库没有任何演示客户、字典或会话', () => {
     for (const table of [
       'customers',

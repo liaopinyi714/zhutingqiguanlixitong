@@ -43,6 +43,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0008_repairs.sql', 'utf8'));
   db.exec(readFileSync('migrations/0009_accounts.sql', 'utf8'));
   db.exec(readFileSync('migrations/0010_stores.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0011_account_profiles_store_lifecycle.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',
@@ -74,6 +75,67 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('头像按门店保存，更新姓名和停用权限时不丢失头像，拒绝外链和 SVG', async () => {
+    const avatar = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=';
+    const account = { email: 'owner@demo.invalid', name: '店主', enabled: true, avatar };
+    expect((await req('/accounts', 'PUT', account)).status).toBe(200);
+    expect((await (await req('/me')).json() as any).avatar).toBe(avatar);
+    expect((await (await req('/accounts')).json() as any[])[0].avatar).toBe(avatar);
+    expect((await req('/accounts', 'PUT', { ...account, avatar: undefined, name: '新名称' })).status).toBe(200);
+    expect((await (await req('/me')).json() as any).avatar).toBe(avatar);
+    for (const invalid of ['https://example.com/avatar.png', 'data:image/svg+xml;base64,PHN2Zz4=', 'data:image/png;base64,invalid', avatar + 'A'.repeat(50000)]) {
+      expect((await req('/accounts', 'PUT', { ...account, avatar: invalid })).status).toBe(400);
+    }
+    await switchToNewStore();
+    expect((await (await req('/me')).json() as any).avatar).toBe('');
+    const switched = await req('/accounts/stores/demo-store/switch', 'POST');
+    cookie = cookie.split(';')[0] + '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await (await req('/me')).json() as any).avatar).toBe(avatar);
+    expect((await req('/accounts', 'PUT', { ...account, avatar: '' })).status).toBe(200);
+    expect((await (await req('/me')).json() as any).avatar).toBe('');
+  });
+  it('门店删除需确认名称且保留另一个入口，30 天内可恢复并保留原有资料', async () => {
+    const home = (await (await req('/me')).json() as any).storeName;
+    expect((await req('/accounts/stores/demo-store', 'DELETE', { name: home })).status).toBe(400);
+    await switchToNewStore();
+    const me = await (await req('/me')).json() as any;
+    const created = await (await req('/customers', 'POST', { name: '分店客户', gender: '未填写', birthDate: '', phone: '', source: '', status: '待评估' })).json() as any;
+    expect((await req('/accounts/stores/demo-store', 'DELETE', { name: home })).status).toBe(403);
+    expect((await req('/accounts/stores/' + me.tenant_id, 'DELETE', { name: '错误名称' })).status).toBe(400);
+    const deleted = await req('/accounts/stores/' + me.tenant_id, 'DELETE', { name: me.storeName });
+    expect(deleted.status).toBe(200);
+    cookie = cookie.split(';')[0] + '; ' + deleted.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await (await req('/me')).json() as any).tenant_id).toBe('demo-store');
+    expect((await req('/customers/' + created.id + '/detail')).status).toBe(404);
+    expect((await req('/accounts/stores/' + me.tenant_id + '/switch', 'POST')).status).toBe(403);
+    expect((await (await req('/accounts/stores/removed')).json() as any[])[0].id).toBe(me.tenant_id);
+    expect((await req('/accounts/stores/' + me.tenant_id + '/restore', 'POST')).status).toBe(200);
+    const switched = await req('/accounts/stores/' + me.tenant_id + '/switch', 'POST');
+    cookie = cookie.split(';')[0] + '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
+    expect((await req('/customers/' + created.id + '/detail')).status).toBe(200);
+  });
+  it('过期门店清理客户、头像、业务和 R2 附件，保留其他门店', async () => {
+    await switchToNewStore();
+    const me = await (await req('/me')).json() as any;
+    const customer = await (await req('/customers', 'POST', { name: '待清理客户', gender: '未填写', birthDate: '', phone: '', source: '', status: '待评估' })).json() as any;
+    const form = new FormData();
+    form.append('file', new File(['%PDF-1.4\nfictional'], 'store.pdf', { type: 'application/pdf' }));
+    const uploaded = await app.request('http://localhost/api/customers/' + customer.id + '/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form }, env);
+    const fileId = (await uploaded.json() as any).id;
+    const key = (db.prepare('SELECT object_key FROM attachments WHERE id=?').get(fileId) as any).object_key;
+    const deleted = await req('/accounts/stores/' + me.tenant_id, 'DELETE', { name: me.storeName });
+    cookie = cookie.split(';')[0] + '; ' + deleted.headers.get('Set-Cookie')!.split(';')[0];
+    db.prepare("UPDATE stores SET deleted_at='2026-01-01 00:00:00' WHERE id=?").run(me.tenant_id);
+    expect((await req('/accounts/stores/' + me.tenant_id + '/restore', 'POST')).status).toBe(404);
+    expect(await (await req('/accounts/stores/removed')).json()).toEqual([]);
+    await purgeExpiredRecords(env, new Date('2026-09-30T00:00:00Z'));
+    expect(await env.FILES.get(key)).toBeNull();
+    for (const table of ['customers', 'attachments', 'exams', 'fittings', 'repairs', 'followups', 'audit', 'store_memberships'])
+      expect((db.prepare(`SELECT COUNT(*) n FROM ${table} WHERE tenant_id=?`).get(me.tenant_id) as any).n).toBe(0);
+    expect((await req('/customers/demo-1/detail')).status).toBe(200);
+    expect((await req('/accounts/stores/' + me.tenant_id + '/restore', 'POST')).status).toBe(404);
+  });
   it('直接作图保存 UCL 和六频听阈，保留旧频率，不要求文字结论', async () => {
     const curve = () =>
       frequencies.map((frequency) => ({

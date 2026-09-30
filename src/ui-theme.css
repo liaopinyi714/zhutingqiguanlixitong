@@ -8,6 +8,7 @@
   --ui-muted: #686868;
   --ui-border: #e2e2e2;
   --ui-blue: #0866e8;
+  --green: var(--ui-blue);
 }
 .cf-shell {
   --dark: var(--ui-text);
@@ -324,6 +325,20 @@ tr:focus-visible {
 .cf-shell .empty p {
   font-size: 14px;
   color: var(--ui-muted);
+}
+.cf-shell .empty,
+.cf-shell .empty > svg {
+  color: #858585;
+}
+.cf-shell .search {
+  color: #858585;
+  border-color: var(--ui-border);
+  background: #fff;
+}
+.cf-shell .search input::placeholder,
+.cf-shell input::placeholder,
+.cf-shell textarea::placeholder {
+  color: #858585;
 }
 .cf-shell .timeline p,
 .cf-shell .distribution small,

@@ -36,6 +36,7 @@ import { RequestOrder } from './requestOrder';
 import { Field, FittingDeviceFields } from './Fields';
 import { RecordEditor } from './RecordEditor';
 import { Accounts, AccountsSkeleton, AccountMenu } from './Accounts';
+import { AccountAvatar } from './AccountAvatar';
 import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
@@ -761,7 +762,7 @@ export default function App() {
     }),
     [sidebarHover, setSidebarHover] = useState(false),
     [dataState, setDataState] = useState<Record<Dataset, LoadState>>(initialDataState),
-    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆序听力', tenant_id: '' });
+    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆讯听力', tenant_id: '', avatar: '' });
 
   const intakeDirty = useRef(false);
   const accountDirty = useRef(false);
@@ -1469,7 +1470,7 @@ export default function App() {
       );
       const a = document.createElement('a');
       a.href = url;
-      a.download = `聆序-客户档案-${today()}.json`;
+      a.download = `聆讯-客户档案-${today()}.json`;
       a.click();
       URL.revokeObjectURL(url);
       flash('档案已导出，附件请在档案中单独下载');
@@ -1495,7 +1496,7 @@ export default function App() {
       );
       const link = document.createElement('a');
       link.href = url;
-      link.download = `聆序-${kind === 'core' ? '客户核心信息' : '客户业务数据'}-${today()}.xlsx`;
+      link.download = `聆讯-${kind === 'core' ? '客户核心信息' : '客户业务数据'}-${today()}.xlsx`;
       link.click();
       window.setTimeout(() => URL.revokeObjectURL(url), 60000);
       flash(kind === 'core' ? '核心信息表格已下载' : '业务数据表格已下载');
@@ -1519,14 +1520,14 @@ export default function App() {
               <Ear size={23} />
             </span>
             <div>
-              <b>聆序</b>
+              <b>聆讯</b>
               <small>HEARING CARE</small>
             </div>
           </div>
         </header>
         <main className="cf-login-main">
           <div className="cf-login-intro">
-            <h1>进入聆序工作台</h1>
+            <h1>进入聆讯工作台</h1>
             <p>{identity.demo ? '使用店主账户体验客户管理。' : '使用已授权的邮箱登录。'}</p>
           </div>
           <section className="cf-login-card">
@@ -1570,7 +1571,7 @@ export default function App() {
             </p>
           </section>
         </main>
-        <footer className="cf-login-footer">聆序 · 助听器客户管理</footer>
+        <footer className="cf-login-footer">聆讯 · 助听器客户管理</footer>
       </div>
     );
   const navs = [
@@ -1843,7 +1844,7 @@ export default function App() {
               <Ear size={24} />
             </span>
             <div>
-              <b>聆序</b>
+              <b>聆讯</b>
               {boot ? <small className="skeleton-line boot-store-name" /> : <small>{identity.storeName}</small>}
             </div>
           </div>
@@ -1890,7 +1891,7 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              <span className="profile-avatar">{boot ? '' : (identity.name || role).slice(0, 1)}</span>
+              <AccountAvatar className="profile-avatar" avatar={boot ? '' : identity.avatar} name={boot ? '' : identity.name || role} />
               <div>
                 <strong>{boot ? <span className="skeleton-line boot-profile-name" /> : identity.name || role}</strong>
                 <small>店主</small>
@@ -1971,7 +1972,7 @@ export default function App() {
       <main className="main">
         <header className="topbar">
           <div className="breadcrumb">
-            <button onClick={() => navigate('overview')}>聆序</button> <ChevronRight size={14} />{' '}
+            <button onClick={() => navigate('overview')}>聆讯</button> <ChevronRight size={14} />{' '}
             <button onClick={() => navigate(page)}>
               {page === 'accounts'
                 ? '账户管理'
@@ -2011,7 +2012,7 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              {boot ? '' : (identity.name || role).slice(0, 1)}
+              <AccountAvatar className="top-avatar-content" avatar={boot ? '' : identity.avatar} name={boot ? '' : identity.name || role} />
             </button>
           </div>
         </header>
