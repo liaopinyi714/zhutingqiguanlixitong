@@ -1744,7 +1744,6 @@ textarea:focus-visible {
 .cf-shell.booting button { pointer-events: none; }
 .cf-shell .sidebar .boot-store-name { width: 86px; height: 11px; margin-top: 7px; }
 .cf-shell .boot-profile-name { width: 80px; height: 12px; }
-.cf-shell .boot-demo-pill { width: 55px; height: 21px; border-radius: 12px; }
 .cf-shell .account-skeleton-icon { width: 35px; height: 35px; }
 .cf-shell .account-skeleton-copy { display: grid; gap: 9px; min-width: 0; flex: 1; }
 .cf-shell .account-skeleton-title { width: 112px; height: 14px; }

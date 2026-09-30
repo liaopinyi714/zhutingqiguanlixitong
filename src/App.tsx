@@ -2010,7 +2010,7 @@ export default function App() {
             >
               <Search size={19} />
             </button>
-            {boot ? <span className="skeleton-line boot-demo-pill" /> : identity.demo && <span className="demo-pill">演示版</span>}
+            {identity.demo && <span className="demo-pill">演示版</span>}
             <button
               className="icon-button"
               aria-label="查看待办"
