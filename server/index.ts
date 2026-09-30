@@ -41,12 +41,27 @@ app.use('/api/*', async (c, next) => {
       return c.json({ error: '请求校验失败，请刷新后重试' }, 403);
   }
   if (c.req.path === '/api/config') return next();
+  // Logging out must remain possible after the operator revokes the identity
+  // or a colleague removes its last store membership. Origin checks still apply.
+  if (c.req.path === '/api/logout') return next();
   if (c.req.path === '/api/login') {
     if (!demo) return c.json({ error: '正式环境不支持演示角色登录' }, 403);
     return next();
   }
-  const selectedStore = getCookie(c, 'hearing_store');
-  const mayRecover = c.req.path === '/api/me' ||
+  // The cookie is only a default for a newly opened page. Existing tabs bind
+  // requests to their displayed store, and still undergo membership checks.
+  const explicitStore =
+    c.req.header('X-Hearing-Store') ??
+    (c.req.path.startsWith('/api/files/') ? c.req.query('store') : undefined);
+  if (
+    explicitStore !== undefined &&
+    explicitStore !== '' &&
+    !/^[a-zA-Z0-9_-]{1,64}$/.test(explicitStore)
+  )
+    return c.json({ error: '门店标识无效' }, 400);
+  const selectedStore = explicitStore ?? getCookie(c, 'hearing_store');
+  const mayRecover =
+    c.req.path === '/api/me' ||
     c.req.path === '/api/accounts/stores' ||
     /^\/api\/accounts\/stores\/[^/]+\/switch$/.test(c.req.path);
   if (!demo) {
@@ -54,15 +69,18 @@ app.use('/api/*', async (c, next) => {
       try {
         return await resolveAccount(c.env, email, false, selectedStore);
       } catch (error) {
-        if (!selectedStore || !mayRecover || !(error instanceof AuthError)) throw error;
+        if (
+          explicitStore !== undefined ||
+          !selectedStore ||
+          !mayRecover ||
+          !(error instanceof AuthError)
+        )
+          throw error;
         deleteCookie(c, 'hearing_store', { path: '/' });
         return resolveAccount(c.env, email);
       }
     };
-    c.set(
-      'session',
-      await accessSession(c.req.raw, c.env, lookup),
-    );
+    c.set('session', await accessSession(c.req.raw, c.env, lookup));
     return next();
   }
   const token = getCookie(c, 'hearing_session');
@@ -75,7 +93,13 @@ app.use('/api/*', async (c, next) => {
   try {
     c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore));
   } catch (error) {
-    if (!selectedStore || !mayRecover || !(error instanceof AuthError)) throw error;
+    if (
+      explicitStore !== undefined ||
+      !selectedStore ||
+      !mayRecover ||
+      !(error instanceof AuthError)
+    )
+      throw error;
     deleteCookie(c, 'hearing_store', { path: '/' });
     c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true));
   }
@@ -88,10 +112,21 @@ app.use('/api/*', async (c, next) =>
   })(c, next),
 );
 app.use('/api/*', async (c, next) => {
-  const personal = ['/api/config', '/api/login', '/api/me', '/api/logout', '/api/auth/start'].includes(c.req.path)
-    || c.req.path === '/api/accounts' || c.req.path.startsWith('/api/accounts/');
+  const personal =
+    ['/api/config', '/api/login', '/api/me', '/api/logout', '/api/auth/start'].includes(
+      c.req.path,
+    ) ||
+    c.req.path === '/api/accounts' ||
+    c.req.path.startsWith('/api/accounts/');
   if (!personal && !c.get('session')?.tenant_id)
     return c.json({ error: '请先加入或创建门店，再访问客户和业务资料' }, 403);
+  if (
+    !personal &&
+    !['GET', 'HEAD'].includes(c.req.method) &&
+    !isLocalDemo(c.env, c.req.url) &&
+    !c.req.header('X-Hearing-Store')
+  )
+    return c.json({ error: '页面版本已更新，请刷新后再保存资料' }, 409);
   return next();
 });
 app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
@@ -317,14 +352,16 @@ app.post('/api/customers/:id/restore', async (c) => {
     .bind(key, s.tenant_id, retentionCutoff())
     .first();
   if (!row) return c.json({ error: '已删除档案不存在' }, 404);
-  await c.env.DB.batch([
+  const [restored] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE customers SET deleted_at=NULL WHERE id=? AND tenant_id=? AND deleted_at IS NOT NULL',
+      "UPDATE customers SET deleted_at=NULL WHERE id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days') RETURNING id",
     ).bind(key, s.tenant_id),
     c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
     ).bind(id(), s.tenant_id, s.actor, '恢复客户档案', key),
   ]);
+  if (!restored.results.length)
+    return c.json({ error: '记录状态已变化或恢复期已过，请刷新后重试' }, 409);
   return c.json({ ok: true });
 });
 app.use('/api/customers/:id/*', async (c, next) => {
@@ -669,12 +706,14 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
         .first();
       if (!fitting) return c.json({ error: '请先恢复关联的验配记录' }, 400);
     }
-    await c.env.DB.batch([
+    const [restored] = await c.env.DB.batch([
       c.env.DB.prepare(
-        `UPDATE ${kind} SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=?`,
+        `UPDATE ${kind} SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days')
+         AND EXISTS(SELECT 1 FROM customers c WHERE c.id=${kind}.customer_id AND c.tenant_id=${kind}.tenant_id AND c.deleted_at IS NULL)
+         ${kind === 'repairs' ? 'AND EXISTS(SELECT 1 FROM fittings f WHERE f.id=repairs.fitting_id AND f.tenant_id=repairs.tenant_id AND f.customer_id=repairs.customer_id AND f.deleted_at IS NULL)' : ''} RETURNING id`,
       ).bind(record, customer, s.tenant_id),
       c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
       ).bind(
         id(),
         s.tenant_id,
@@ -689,6 +728,8 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
         customer,
       ),
     ]);
+    if (!restored.results.length)
+      return c.json({ error: '记录或关联资料状态已变化，请刷新后重试' }, 409);
     return c.json({ ok: true });
   });
 }
@@ -838,14 +879,17 @@ app.post('/api/customers/:id/attachments/:recordId/restore', async (c) => {
     .bind(record, customer, s.tenant_id, retentionCutoff())
     .first();
   if (!existing) return c.json({ error: '已删除附件不存在或超过恢复期限' }, 404);
-  await c.env.DB.batch([
+  const [restored] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE attachments SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL',
+      `UPDATE attachments SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days')
+       AND EXISTS(SELECT 1 FROM customers c WHERE c.id=attachments.customer_id AND c.tenant_id=attachments.tenant_id AND c.deleted_at IS NULL) RETURNING id`,
     ).bind(record, customer, s.tenant_id),
     c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
     ).bind(id(), s.tenant_id, s.actor, '恢复报告附件', customer),
   ]);
+  if (!restored.results.length)
+    return c.json({ error: '附件状态已变化或恢复期已过，请刷新后重试' }, 409);
   return c.json({ ok: true });
 });
 app.get('/api/files/:id', async (c) => {

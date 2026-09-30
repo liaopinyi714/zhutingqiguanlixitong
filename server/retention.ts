@@ -99,6 +99,10 @@ export async function purgeExpiredRecords(
     .bind(cutoff)
     .run();
   await env.DB.prepare(`DELETE FROM store_memberships WHERE ${expiredStore}`).bind(cutoff).run();
+  // Historical catalog data is no longer editable, but must follow store
+  // retention too. Delete children before parents to respect foreign keys.
+  for (const table of ['device_models', 'device_series', 'device_brands'])
+    await env.DB.prepare(`DELETE FROM ${table} WHERE ${expiredStore}`).bind(cutoff).run();
   // Independent account profiles survive store deletion. Keep the small
   // disabled membership tombstone to prevent initial configuration re-adding
   // people after their voluntary recovery period expires.

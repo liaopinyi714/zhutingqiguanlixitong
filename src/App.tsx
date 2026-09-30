@@ -41,6 +41,7 @@ import { AccountAvatar } from './AccountAvatar';
 import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
+import { api } from './api';
 
 import type { Customer, Exam, Follow, Detail, Point } from './types';
 const blankCurve = () =>
@@ -89,25 +90,6 @@ const restoreDeadline = (deletedAt: string) =>
       minute: '2-digit',
     },
   );
-async function api(path: string, method = 'GET', data?: unknown) {
-  const response = await fetch('/api' + path, {
-    method,
-    headers: {
-      'X-Requested-With': 'hearing-care',
-      ...(data instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-    },
-    redirect: 'manual',
-    body: data === undefined ? undefined : data instanceof FormData ? data : JSON.stringify(data),
-  });
-  if (
-    response.type === 'opaqueredirect' ||
-    !response.headers.get('Content-Type')?.includes('application/json')
-  )
-    throw new Error('登录可能已过期。请先保存未提交的内容，再刷新页面重新登录。');
-  const result: any = await response.json();
-  if (!response.ok) throw new Error(result.error || '请求失败');
-  return result;
-}
 function Badge({ status }: { status: string }) {
   return (
     <span className={'badge status-' + statuses.indexOf(status)}>
@@ -3111,7 +3093,7 @@ export default function App() {
                         <div className="attachment-list">
                           {detail.attachments.map((a) => (
                             <div key={a.id} className="attachment-item">
-                              <a href={'/api/files/' + a.id} className="attachment">
+                              <a href={'/api/files/' + a.id + '?store=' + encodeURIComponent(identity.tenant_id)} className="attachment">
                                 <FileText size={24} />
                                 <div>
                                   <strong>{a.name}</strong>

@@ -81,9 +81,11 @@ async function accountProfile(env: Env, email: string, demo: boolean) {
     )
       .bind(email, configured.tenant_id)
       .first();
-    const store = await env.DB.prepare('SELECT deleted_at,abandoned_at FROM stores WHERE id=?')
-      .bind(configured.tenant_id)
-      .first<{ deleted_at: string | null; abandoned_at: string | null }>();
+    const store = member
+      ? null
+      : await env.DB.prepare('SELECT deleted_at,abandoned_at FROM stores WHERE id=?')
+          .bind(configured.tenant_id)
+          .first<{ deleted_at: string | null; abandoned_at: string | null }>();
     if (
       !member &&
       !store?.deleted_at &&
@@ -100,11 +102,13 @@ async function accountProfile(env: Env, email: string, demo: boolean) {
             "INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'config')",
           ).bind(a.email, a.tenant_id, a.name, a.store_name),
           env.DB.prepare(
-            "INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source) VALUES(?,?,?,1,'config')",
-          ).bind(a.email, a.tenant_id, a.name),
+            `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
+             SELECT ?,?,?,1,'config' WHERE EXISTS(SELECT 1 FROM stores WHERE id=? AND deleted_at IS NULL
+               AND (abandoned_at IS NULL OR abandoned_at>datetime('now','-30 days')))`,
+          ).bind(a.email, a.tenant_id, a.name, a.tenant_id),
         ]),
         env.DB.prepare(
-          'UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL',
+          "UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL AND abandoned_at>datetime('now','-30 days')",
         ).bind(configured.tenant_id),
       ]);
     }
@@ -120,13 +124,13 @@ async function storesForAccount(env: Env, email: string): Promise<Store[]> {
     await env.DB.prepare(
       `SELECT m.tenant_id id,s.name,m.enabled,m.source
      FROM store_memberships m JOIN stores s ON s.id=m.tenant_id
-     WHERE m.email=? AND s.deleted_at IS NULL AND (s.abandoned_at IS NULL OR s.abandoned_at>?)
+     WHERE m.email=? AND m.enabled=1 AND s.deleted_at IS NULL AND (s.abandoned_at IS NULL OR s.abandoned_at>?)
      ORDER BY s.created_at,s.name`,
     )
       .bind(email, retentionCutoff())
       .all<Store>()
   ).results;
-  return rows.filter((row) => !!row.enabled);
+  return rows;
 }
 
 export async function resolveAccount(
@@ -137,9 +141,12 @@ export async function resolveAccount(
 ): Promise<Session> {
   const { account, configured } = await accountProfile(env, email, demo);
   const stores = await storesForAccount(env, email);
-  const store = selectedStore
-    ? stores.find((row) => row.id === selectedStore)
-    : stores.find((row) => row.id === configured.tenant_id) || stores[0];
+  const store =
+    selectedStore === ''
+      ? undefined
+      : selectedStore
+        ? stores.find((row) => row.id === selectedStore)
+        : stores.find((row) => row.id === configured.tenant_id) || stores[0];
   if (selectedStore && !store) throw new AuthError('此账户没有当前门店的访问权限', 403);
   return {
     role: '店主',
@@ -169,7 +176,10 @@ function markAbandoned(env: Env, storeId: string, demo: boolean) {
         AND m.email=json_extract(p.value,'$.email'))`,
   ).bind(storeId, JSON.stringify(provided));
 }
-function selectCookie(c: Context<{ Bindings: Env; Variables: { session: Session } }>, storeId: string) {
+function selectCookie(
+  c: Context<{ Bindings: Env; Variables: { session: Session } }>,
+  storeId: string,
+) {
   if (!storeId) {
     deleteCookie(c, 'hearing_store', { path: '/' });
     return;
@@ -206,7 +216,14 @@ accountRoutes.get('/', async (c) => {
      JOIN accounts a ON a.email=m.email WHERE m.tenant_id=? AND (m.left_at IS NULL OR m.left_at>?) ORDER BY a.name,a.email`,
     )
       .bind(s.tenant_id, retentionCutoff())
-      .all<{ email: string; name: string; avatar: string; enabled: number; last_seen_at: number | null; left_at: string | null }>()
+      .all<{
+        email: string;
+        name: string;
+        avatar: string;
+        enabled: number;
+        last_seen_at: number | null;
+        left_at: string | null;
+      }>()
   ).results;
   return c.json(
     rows
@@ -333,16 +350,19 @@ accountRoutes.post('/stores/:id/rejoin', async (c) => {
   if (!row) return c.json({ error: '门店不可恢复加入，请联系门店店主重新添加' }, 403);
   await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE store_memberships SET enabled=1,left_at=NULL WHERE email=? AND tenant_id=? AND enabled=0 AND left_at=?',
+      `UPDATE store_memberships SET enabled=1,left_at=NULL WHERE email=? AND tenant_id=? AND enabled=0 AND left_at=?
+       AND left_at>datetime('now','-30 days') AND EXISTS(SELECT 1 FROM stores t WHERE t.id=store_memberships.tenant_id
+         AND t.deleted_at IS NULL AND (t.abandoned_at IS NULL OR t.abandoned_at>datetime('now','-30 days')))`,
     ).bind(s.email, target, row.left_at),
     c.env.DB.prepare(
       `UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL
       AND EXISTS(SELECT 1 FROM store_memberships WHERE email=? AND tenant_id=? AND enabled=1 AND left_at IS NULL)`,
     ).bind(target, s.email, target),
-    c.env.DB.prepare(`INSERT INTO audit(id,tenant_id,actor,action,customer_id)
+    c.env.DB.prepare(
+      `INSERT INTO audit(id,tenant_id,actor,action,customer_id)
       SELECT ?,?,?,?,NULL WHERE EXISTS(SELECT 1 FROM store_memberships
-        WHERE email=? AND tenant_id=? AND enabled=1 AND left_at IS NULL)`)
-      .bind(crypto.randomUUID(), target, s.actor, '恢复加入门店', s.email, target),
+        WHERE email=? AND tenant_id=? AND enabled=1 AND left_at IS NULL)`,
+    ).bind(crypto.randomUUID(), target, s.actor, '恢复加入门店', s.email, target),
   ]);
   const next = await resolveAccount(c.env, s.email || '', isLocalDemo(c.env, c.req.url), target);
   selectCookie(c, next.tenant_id);
@@ -388,12 +408,17 @@ accountRoutes.post('/stores/:id/restore', async (c) => {
     .bind(target, s.email, retentionCutoff())
     .first();
   if (!row) return c.json({ error: '门店不存在、恢复期已过或没有恢复权限' }, 404);
-  await c.env.DB.batch([
+  const [restored] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE stores SET deleted_at=NULL,abandoned_at=NULL WHERE id=? AND deleted_at>?',
-    ).bind(target, retentionCutoff()),
-    audit(c.env, s, '恢复门店', target),
+      `UPDATE stores SET deleted_at=NULL,abandoned_at=NULL WHERE id=? AND deleted_at>datetime('now','-30 days')
+       AND EXISTS(SELECT 1 FROM store_memberships m WHERE m.tenant_id=stores.id AND m.email=? AND m.enabled=1) RETURNING id`,
+    ).bind(target, s.email),
+    c.env.DB.prepare(
+      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,NULL WHERE changes()>0',
+    ).bind(crypto.randomUUID(), target, s.actor, '恢复门店'),
   ]);
+  if (!restored.results.length)
+    return c.json({ error: '门店状态或恢复权限已变化，请刷新后重试' }, 409);
   return c.json({ ok: true });
 });
 
