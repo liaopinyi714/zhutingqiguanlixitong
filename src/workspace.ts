@@ -1,3 +1,5 @@
+import { daysUntil as warrantyDays } from '../shared/calendar';
+export { warrantyDays };
 export const pages = [
   'overview',
   'customers',
@@ -61,12 +63,6 @@ export function deviceSerial(value: any) {
       .join('；') ||
     value?.serial ||
     '序列号未填写'
-  );
-}
-export function warrantyDays(date: string) {
-  const today = new Date().toLocaleDateString('sv-SE');
-  return Math.round(
-    (new Date(date + 'T00:00:00').getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000,
   );
 }
 export function warrantyLabel(date: string) {

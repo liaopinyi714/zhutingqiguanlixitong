@@ -97,16 +97,21 @@ async function accountProfile(env: Env, email: string, demo: boolean) {
           configured.tenant_id,
           configured.store_name,
         ),
-        ...peers.flatMap((a) => [
-          env.DB.prepare(
-            "INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'config')",
-          ).bind(a.email, a.tenant_id, a.name, a.store_name),
-          env.DB.prepare(
-            `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
-             SELECT ?,?,?,1,'config' WHERE EXISTS(SELECT 1 FROM stores WHERE id=? AND deleted_at IS NULL
-               AND (abandoned_at IS NULL OR abandoned_at>datetime('now','-30 days')))`,
-          ).bind(a.email, a.tenant_id, a.name, a.tenant_id),
-        ]),
+        // A statement per peer can exceed D1 Free's 50-query request limit.
+        // json_each keeps bootstrap at four statements regardless of roster size.
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source)
+           SELECT json_extract(value,'$.email'),json_extract(value,'$.tenant_id'),
+             json_extract(value,'$.name'),json_extract(value,'$.store_name'),1,'config'
+           FROM json_each(?)`,
+        ).bind(JSON.stringify(peers)),
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
+           SELECT json_extract(p.value,'$.email'),json_extract(p.value,'$.tenant_id'),
+             json_extract(p.value,'$.name'),1,'config' FROM json_each(?) p
+           JOIN stores t ON t.id=json_extract(p.value,'$.tenant_id') WHERE t.deleted_at IS NULL
+             AND (t.abandoned_at IS NULL OR t.abandoned_at>datetime('now','-30 days'))`,
+        ).bind(JSON.stringify(peers)),
         env.DB.prepare(
           "UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL AND abandoned_at>datetime('now','-30 days')",
         ).bind(configured.tenant_id),

@@ -1,6 +1,6 @@
 # 只用网页部署到 Cloudflare
 
-核对日期：2026-09-27。本指南适用于 `liaopinyi714/zhutingqiguanlixitong` 仓库的 `main` 分支。你不需要在电脑上安装 Git、Node.js 或 pnpm，也不需要打开命令行。Cloudflare 的 Workers Builds 会从 GitHub 拉取代码，在云端运行项目自带的测试、建表和发布步骤。
+核对日期：2026-09-30。本指南适用于 `liaopinyi714/zhutingqiguanlixitong` 仓库的 `main` 分支。你不需要在电脑上安装 Git、Node.js 或 pnpm，也不需要打开命令行。Cloudflare 的 Workers Builds 会从 GitHub 拉取代码，在云端运行项目自带的检查、建表和发布步骤。日常账户开通和门店操作见 [运行维护](OPERATIONS.md)。
 
 首次配置预计需要 Cloudflare 账户、GitHub 仓库的管理权限、你能收验证码的员工邮箱。界面文字可能随控制台版本略有变化，认准对应的 Worker、D1、R2、Access 和 Builds 页面。
 
@@ -8,12 +8,12 @@
 
 本项目默认使用以下名称。请直接使用，减少配置差错。
 
-| 用途 | 名称 |
-| --- | --- |
-| Worker 网站 | `hearing-care` |
-| D1 正式数据库 | `hearing-care-production` |
-| R2 私有存储桶 | `hearing-care-production-private` |
-| GitHub 仓库 | `liaopinyi714/zhutingqiguanlixitong`，生产分支 `main` |
+| 用途          | 名称                                                  |
+| ------------- | ----------------------------------------------------- |
+| Worker 网站   | `hearing-care`                                        |
+| D1 正式数据库 | `hearing-care-production`                             |
+| R2 私有存储桶 | `hearing-care-production-private`                     |
+| GitHub 仓库   | `liaopinyi714/zhutingqiguanlixitong`，生产分支 `main` |
 
 ## 1. 创建空的 Worker
 
@@ -46,7 +46,15 @@ R2 有免费额度，但超过免费额度会按量收费；开通页面可能�
 进入 **Workers & Pages → hearing-care → Settings → Variables and Secrets → Add**。类型选 **Secret**，名称准确填写 `STAFF_ACCOUNTS`，值填写下面这样的 JSON；将邮箱、姓名、门店名称换成自己的真实信息：
 
 ```json
-[{"email":"你用于登录的邮箱@example.com","name":"你的姓名","role":"店主","tenantId":"store-001","storeName":"你的助听器门店"}]
+[
+  {
+    "email": "你用于登录的邮箱@example.com",
+    "name": "你的姓名",
+    "role": "店主",
+    "tenantId": "store-001",
+    "storeName": "你的助听器门店"
+  }
+]
 ```
 
 示例中的邮箱是占位符，必须替换为真实邮箱。所有登录账户都需要由网站提供者加入这个 Secret，并加入 Access Allow 策略。网站账户管理只能把已授权邮箱添加到门店，不能创建登录账户。新账户可以只填写 email、name、role（店主），同时省略 tenantId 和 storeName；登录后可新建门店，或由其他店主添加。已有账户的门店成员关系保存在 D1，个人姓名和头像只允许本人修改。退出后 30 天内可恢复加入，其他店主可取消恢复资格；没有有效成员的门店保留 30 天再清理。更新 Secret 时需填写完整名单，保留原有邮箱；删除邮箱会撤销该账户全部访问。之前通过网页创建的合法账户也必须补进该名单。tenantId 和 storeName 仅用于初始门店配置，正式使用后不要随意更换门店 ID。
@@ -55,12 +63,12 @@ R2 有免费额度，但超过免费额度会按量收费；开通页面可能�
 
 ## 5. 让云端构建有建表权限
 
-Workers Builds 创建的默认发布令牌不包含 D1 写入权限。本项目让 Cloudflare 自动应用 `migrations-production/` 中的建表文件，因此构建令牌还需要目标账户的 **D1 → Edit** 权限。
+本项目让 Cloudflare 自动应用 `migrations-production/` 中的建表文件，因此构建令牌需要目标账户的 **D1 → Edit** 权限。请实际核对权限，不能只依赖默认发布令牌的名称判断它是否足够。
 
 在 Cloudflare 网站中完成以下配置：
 
 1. 打开右上角头像 → **My Profile → API Tokens**。
-2. 创建一个仅限当前账户的自定义 API Token。可从 **Edit Cloudflare Workers** 模板开始，再检查或补齐这些权限：**Account Settings → Read、Workers Scripts → Edit、Workers KV Storage → Edit、Workers R2 Storage → Edit、D1 → Edit**；若界面要求，还需 **Zone Workers Routes → Edit**、**User Details → Read**、**Memberships → Read**。资源范围限制到本项目使用的 Cloudflare 账户。
+2. 创建一个仅限当前账户的自定义 API Token。可从 **Edit Cloudflare Workers** 模板开始，再检查或补齐 **Workers Scripts → Edit、Workers R2 Storage → Edit、D1 → Edit** 及模板所需的账户读取权限。若同时管理自定义域名，还需相应 Zone 读取/Workers 路由权限。本项目没有使用 KV，不为业务数据额外开通 KV。资源范围限制到本项目使用的 Cloudflare 账户。
 3. 保存 Token。不要将 Token 填入 GitHub 文件、Build Variables 或聊天消息。下一步在 Worker 的 **Settings → Builds → API token** 处选择刚创建的 Token。如果控制台允许直接编辑已经自动生成的 Builds Token，也可以给它增加 D1 Edit，而不另建一个。
 
 此 Token 供 Cloudflare 自己的构建环境使用；你不需要在本机登录 Wrangler。
@@ -74,21 +82,21 @@ Workers Builds 创建的默认发布令牌不包含 D1 写入权限。本项目�
 5. 在 **API token** 下拉框选择第 5 步的 Token。
 6. 在 **Build Variables and Secrets** 中加入下表。这里是构建期间的变量，不是 Worker 运行时的 Secret。除表中值外不要添加 `STAFF_ACCOUNTS`。
 
-| 变量名 | 填写值 |
-| --- | --- |
-| `CLOUDFLARE_ACCOUNT_ID` | 第 1 步复制的 Account ID |
-| `D1_DATABASE_ID` | 第 2 步复制的 Database ID |
-| `ACCESS_TEAM_DOMAIN` | 第 3 步的团队域名，不带协议前缀 |
-| `ACCESS_AUD` | 第 3 步的 Application Audience (AUD) Tag |
-| `PNPM_VERSION` | `11.19.0` |
-| `NODE_VERSION` | `24` |
+| 变量名                  | 填写值                                   |
+| ----------------------- | ---------------------------------------- |
+| `CLOUDFLARE_ACCOUNT_ID` | 第 1 步复制的 Account ID                 |
+| `D1_DATABASE_ID`        | 第 2 步复制的 Database ID                |
+| `ACCESS_TEAM_DOMAIN`    | 第 3 步的团队域名，不带协议前缀          |
+| `ACCESS_AUD`            | 第 3 步的 Application Audience (AUD) Tag |
+| `PNPM_VERSION`          | `11.19.0`                                |
+| `NODE_VERSION`          | `24`                                     |
 
 名称与本文一致时，无需填写 `WORKER_NAME`、`D1_DATABASE_NAME` 或 `R2_BUCKET_NAME`。构建会根据这些值生成正式配置；仓库里的占位配置不会被直接发布。`PNPM_VERSION` 必须设置，因为 Cloudflare 构建镜像默认 pnpm 版本与本项目锁文件不一致。
 
 7. 在 **Settings → Builds → Branch control** 关闭 **Enable Preview Builds**。本项目第一次上线只使用 `main` 的正式构建；脚本也会拒绝在其他 Cloudflare 构建分支操作正式数据库。
 8. 保存构建设置。若连接仓库时已经启动了第一次构建，而此时变量或 Token 尚未填完，第一次失败是预期结果。设置完成后打开 **Builds**，对最近的 `main` 构建点 **Retry**；若界面没有 Retry，可从 GitHub 网页对 `main` 提交一次实际代码更新来触发新构建。
 
-`build:cloudflare` 在云端先核对配置、运行测试、构建前端，再对远程 D1 应用尚未运行的迁移。只有全部成功，Deploy command 才会发布网站。首次会建立客户、检查、验配、随访和审计等表，正式库里不会生成演示客户。
+`build:cloudflare` 在云端先核对配置，运行 `pnpm check`（文档链接、测试、类型检查与前端构建），再对远程 D1 应用尚未运行的迁移。只有全部成功，Deploy command 才会发布网站。首次执行正式目录的七个迁移，建立业务表、账户和成员关系等，正式库里不会生成演示客户。
 
 ## 7. 核对部署结果
 
@@ -102,15 +110,15 @@ Workers Builds 创建的默认发布令牌不包含 D1 写入权限。本项目�
 
 ## 常见失败原因
 
-| 页面或日志信息 | 处理办法 |
-| --- | --- |
-| `pnpm` 版本或锁文件错误 | 在 **Settings → Builds → Build Variables and Secrets** 核对 `PNPM_VERSION=11.19.0`，再 Retry。 |
-| 缺少 Account ID、D1 ID、Team Domain 或 AUD | 核对六项 Build Variables 的名称和值；Team Domain 不带 `https://`。 |
-| D1 migration 显示 `authentication` / `permission` | 在 **Settings → Builds → API token** 检查选中的 Token，给目标账户授予 D1 Edit 后 Retry。 |
-| 访问出现 `no such table` | 最新构建中的 D1 migration 未成功；检查数据库 ID 指向正式库，不要手动导入 Demo SQL。 |
-| 登录后提示员工权限问题 | 检查 Worker 运行时 `STAFF_ACCOUNTS` Secret 的 JSON、登录邮箱与 Access Allow 策略。 |
-| 上传报告失败 | 检查私有 R2 已开通，`FILES` 绑定正确；单份文件上限为 10 MB。 |
-| 页面仍显示 Hello World | 检查 `main` 分支的最新 Build 是否成功部署，以及 Worker 名称为 `hearing-care`。 |
+| 页面或日志信息                                    | 处理办法                                                                                       |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| `pnpm` 版本或锁文件错误                           | 在 **Settings → Builds → Build Variables and Secrets** 核对 `PNPM_VERSION=11.19.0`，再 Retry。 |
+| 缺少 Account ID、D1 ID、Team Domain 或 AUD        | 核对六项 Build Variables 的名称和值；Team Domain 不带 `https://`。                             |
+| D1 migration 显示 `authentication` / `permission` | 在 **Settings → Builds → API token** 检查选中的 Token，给目标账户授予 D1 Edit 后 Retry。       |
+| 访问出现 `no such table`                          | 最新构建中的 D1 migration 未成功；检查数据库 ID 指向正式库，不要手动导入 Demo SQL。            |
+| 登录后提示员工权限问题                            | 检查 Worker 运行时 `STAFF_ACCOUNTS` Secret 的 JSON、登录邮箱与 Access Allow 策略。             |
+| 上传报告失败                                      | 检查私有 R2 已开通，`FILES` 绑定正确；单份文件上限为 10 MB。                                   |
+| 页面仍显示 Hello World                            | 检查 `main` 分支的最新 Build 是否成功部署，以及 Worker 名称为 `hearing-care`。                 |
 
 正式数据开始录入后，后续每次向 GitHub `main` 推送代码都会自动运行正式迁移并发布。修改员工名单只需在 Cloudflare 的 Access 策略与 Worker Secret 中同步修改。完整的 D1 与 R2 配套备份仍需另行安排；控制台里的 D1 Time Travel 不能单独恢复报告文件，详见 [备份与恢复](BACKUP.md)。
 

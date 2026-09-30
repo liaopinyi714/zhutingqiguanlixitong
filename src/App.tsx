@@ -31,10 +31,13 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { frequencies, pta } from '../server/domain';
+import { blankCurve } from '../shared/hearing';
+import { today, age, money, daysUntil, localTime, restoreDeadline } from './format';
+import { statuses, Badge, Empty, LoadingRows, Stat, Distribution } from './ui';
+import { Audiogram } from './Audiogram';
+import { IntakePage } from './IntakePage';
 import { HearingEditor } from './HearingEditor';
 import { RequestOrder } from './requestOrder';
-import { Field, FittingDeviceFields } from './Fields';
 import { RecordEditor } from './RecordEditor';
 import { Accounts, AccountsSkeleton, AccountMenu } from './Accounts';
 import { AccountAvatar } from './AccountAvatar';
@@ -42,12 +45,16 @@ import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
 import { api } from './api';
-import { CustomerDetailSkeleton, CustomerPageSkeleton, JourneySkeleton, RecentCustomersSkeleton, RemovedCustomersSkeleton, TaskListSkeleton } from './WorkspaceSkeletons';
+import {
+  CustomerDetailSkeleton,
+  CustomerPageSkeleton,
+  JourneySkeleton,
+  RecentCustomersSkeleton,
+  RemovedCustomersSkeleton,
+  TaskListSkeleton,
+} from './WorkspaceSkeletons';
 
-import type { Customer, Exam, Follow, Detail, Point } from './types';
-const blankCurve = () =>
-  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
-const statuses = ['全部客户', '待评估', '试戴中', '已验配', '长期随访'];
+import type { Customer, Exam, Follow, Detail } from './types';
 type Dataset = 'customers' | 'followups' | 'devices' | 'repairs' | 'removed';
 type LoadState = 'loading' | 'ready' | 'error';
 const initialDataState: Record<Dataset, LoadState> = {
@@ -57,582 +64,6 @@ const initialDataState: Record<Dataset, LoadState> = {
   repairs: 'loading',
   removed: 'loading',
 };
-const today = () => new Date().toLocaleDateString('sv-SE');
-const age = (date: string) => {
-  const d = new Date(date),
-    n = new Date();
-  if (!date || Number.isNaN(d.getTime())) return NaN;
-  return (
-    n.getFullYear() -
-    d.getFullYear() -
-    (n.getMonth() < d.getMonth() || (n.getMonth() === d.getMonth() && n.getDate() < d.getDate())
-      ? 1
-      : 0)
-  );
-};
-const money = (n: number) => new Intl.NumberFormat('zh-CN').format(n);
-const daysUntil = (date: string) =>
-  Math.round(
-    (new Date(date + 'T00:00:00').getTime() - new Date(today() + 'T00:00:00').getTime()) / 86400000,
-  );
-const localTime = (value: string) =>
-  new Date(value.includes('T') ? value : value.replace(' ', 'T') + 'Z').toLocaleString('zh-CN', {
-    hour12: false,
-  });
-const restoreDeadline = (deletedAt: string) =>
-  new Date(new Date(deletedAt.replace(' ', 'T') + 'Z').getTime() + 30 * 86400000).toLocaleString(
-    'zh-CN',
-    {
-      hour12: false,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    },
-  );
-function Badge({ status }: { status: string }) {
-  return (
-    <span className={'badge status-' + statuses.indexOf(status)}>
-      <i />
-      {status}
-    </span>
-  );
-}
-function Empty({ text = '还没有记录', action }: { text?: string; action?: ReactNode }) {
-  return (
-    <div className="empty">
-      <ClipboardList size={30} />
-      <p>{text}</p>
-      {action}
-    </div>
-  );
-}
-function LoadingRows({ lines = 3, label = '正在读取数据' }: { lines?: number; label?: string }) {
-  return (
-    <div className="loading-rows" role="status" aria-label={label}>
-      {Array.from({ length: lines }, (_, index) => (
-        <div className="loading-row" key={index}>
-          <span className="skeleton-mark" />
-          <span className="skeleton-line" style={{ width: `${68 - index * 9}%` }} />
-          <span className="skeleton-line skeleton-end" />
-        </div>
-      ))}
-    </div>
-  );
-}
-function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
-  const width = 550,
-    height = 570,
-    x = (f: number) => 55 + (Math.log2(f / 125) / 6) * 450,
-    y = (n: number) => 30 + (n + 10) * 3.75;
-  const symbol = (p: Point, key: string, color: string, bone: boolean, left: boolean) => {
-    if (p.value === null) return null;
-    const xx = x(p.frequency),
-      yy = y(p.value);
-    return (
-      <g key={key} stroke={color} strokeWidth="2" fill="white">
-        <title>{`${left ? '左耳' : '右耳'}${bone ? '骨导' : '气导'} ${p.frequency} Hz：${p.value} dB HL${p.masked ? '（掩蔽）' : ''}${p.noResponse ? '，无反应' : ''}`}</title>
-        {bone ? (
-          <path
-            d={
-              p.masked
-                ? left
-                  ? `M${xx - 5},${yy - 6}h7v12h-7`
-                  : `M${xx + 5},${yy - 6}h-7v12h7`
-                : left
-                  ? `M${xx - 4},${yy - 6}l7,6l-7,6`
-                  : `M${xx + 4},${yy - 6}l-7,6l7,6`
-            }
-            fill="none"
-          />
-        ) : p.masked ? (
-          left ? (
-            <rect x={xx - 5} y={yy - 5} width="10" height="10" />
-          ) : (
-            <path d={`M${xx},${yy - 6}l6,11h-12Z`} />
-          )
-        ) : left ? (
-          <path d={`M${xx - 5},${yy - 5}l10,10m0,-10l-10,10`} fill="none" />
-        ) : (
-          <circle cx={xx} cy={yy} r="5" />
-        )}
-        {p.noResponse && (
-          <path
-            d={left ? `M${xx + 4},${yy + 5}l8,8m-6,0h6v-6` : `M${xx - 4},${yy + 5}l-8,8m0,-6v6h6`}
-            fill="none"
-          />
-        )}
-      </g>
-    );
-  };
-  const line = (points: Point[], color: string, opacity = 1) => {
-    let connect = false;
-    const path = [...points]
-      .sort((a, b) => a.frequency - b.frequency)
-      .map((p) => {
-        if (p.noResponse) {
-          connect = false;
-          return '';
-        }
-        if (p.value === null) return '';
-        const command = connect ? 'L' : 'M';
-        connect = true;
-        return `${command}${x(p.frequency)},${y(p.value)}`;
-      })
-      .join(' ');
-    return (
-      <path
-        d={path}
-        stroke={color}
-        strokeWidth="1.8"
-        opacity={opacity}
-        fill="none"
-        strokeDasharray={opacity < 1 ? '5 4' : undefined}
-      />
-    );
-  };
-  return (
-    <svg
-      className="audiogram"
-      viewBox={`0 0 ${width} ${height}`}
-      role="img"
-      aria-label="左右耳纯音听力图，横轴频率，纵轴听阈"
-    >
-      <rect x="55" y="30" width="450" height="487.5" fill="#fff" />
-      {Array.from({ length: 14 }, (_, i) => i * 10 - 10).map((n) => (
-        <g key={n}>
-          <line x1="55" x2="505" y1={y(n)} y2={y(n)} stroke={n === 20 ? '#d3dfdb' : '#e9edeb'} />
-          <text x="43" y={y(n) + 4} textAnchor="end" className="chart-label">
-            {n}
-          </text>
-        </g>
-      ))}
-      {frequencies.map((f) => (
-        <g key={f}>
-          <line
-            x1={x(f)}
-            x2={x(f)}
-            y1="30"
-            y2="517.5"
-            stroke="#e9edeb"
-            strokeDasharray={[750, 1500, 3000, 6000].includes(f) ? '3 3' : undefined}
-          />
-          {![750, 1500, 3000, 6000].includes(f) && (
-            <text x={x(f)} y="541" textAnchor="middle" className="chart-label">
-              {f >= 1000 ? f / 1000 + 'k' : f}
-            </text>
-          )}
-        </g>
-      ))}
-      <text x="14" y="15" className="chart-label">
-        dB HL
-      </text>
-      <text x="495" y="561" className="chart-label">
-        Hz
-      </text>
-      {previous && (
-        <>
-          {line(previous.right, '#be6058', 0.28)}
-          {line(previous.left, '#497fba', 0.28)}
-        </>
-      )}
-      {line(exam.right, '#bd615c')}
-      {line(exam.left, '#4a7faf')}
-      {exam.right.map((p, i) => symbol(p, 'r' + i, '#bd615c', false, false))}
-      {exam.left.map((p, i) => symbol(p, 'l' + i, '#4a7faf', false, true))}
-      {exam.boneRight.map((p, i) => symbol(p, 'br' + i, '#bd615c', true, false))}
-      {exam.boneLeft.map((p, i) => symbol(p, 'bl' + i, '#4a7faf', true, true))}
-      {(
-        [
-          ['uclRight', '#bd615c'],
-          ['uclLeft', '#4a7faf'],
-        ] as const
-      ).map(([key, color]) =>
-        (exam[key] || [])
-          .filter((p) => p.value !== null)
-          .map((p) => (
-            <text
-              key={key + p.frequency}
-              x={x(p.frequency)}
-              y={y(p.value!) + 5}
-              fill={color}
-              textAnchor="middle"
-              fontSize="15"
-            >
-              U
-              <title>
-                {key === 'uclRight' ? '右耳' : '左耳'} UCL {p.frequency} Hz：{p.value} dB HL
-              </title>
-            </text>
-          )),
-      )}
-    </svg>
-  );
-}
-
-function IntakePage({
-  role,
-  onSave,
-  onCancel,
-  onDirty,
-}: {
-  onDirty: (dirty: boolean) => void;
-  role: string;
-  onSave: (payload: { customer: any; exam?: Exam; fitting?: any; followup?: any }) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [profile, setProfile] = useState({
-    name: '',
-    gender: '未填写',
-    birthDate: '',
-    phone: '',
-    address: '',
-    contact: '',
-    contactPhone: '',
-    source: '自然到店',
-    status: '待评估',
-    history: '',
-    needs: '',
-  });
-  const [examEnabled, setExamEnabled] = useState(false);
-  const [exam, setExam] = useState<Exam>({
-    date: today(),
-    right: blankCurve(),
-    left: blankCurve(),
-    boneRight: blankCurve(),
-    boneLeft: blankCurve(),
-    speech: '',
-    other: '',
-    conclusion: '',
-  });
-  const [fittingEnabled, setFittingEnabled] = useState(false);
-  const [fitting, setFitting] = useState({
-    date: today(),
-    side: '双耳',
-    brand: '',
-    series: '',
-    model: '',
-    serialLeft: '',
-    serialRight: '',
-    amount: 0,
-    warranty: '',
-    notes: '',
-  });
-  const [followupEnabled, setFollowupEnabled] = useState(false);
-  const [followup, setFollowup] = useState({ due: today(), type: '适应回访', note: '' });
-  const [saving, setSaving] = useState(false);
-  const [formError, setFormError] = useState('');
-  const snapshot = JSON.stringify({
-    profile,
-    exam,
-    fitting,
-    followup,
-    examEnabled,
-    fittingEnabled,
-    followupEnabled,
-  });
-  const initialIntake = useRef(snapshot);
-  useEffect(() => {
-    onDirty(snapshot !== initialIntake.current);
-  }, [snapshot]);
-  useEffect(() => () => onDirty(false), []);
-  async function submitIntake(event: FormEvent) {
-    event.preventDefault();
-    setSaving(true);
-    setFormError('');
-    try {
-      await onSave({
-        customer: profile,
-        ...(examEnabled ? { exam } : {}),
-        ...(fittingEnabled
-          ? {
-              fitting: {
-                ...fitting,
-                amount: Number(fitting.amount),
-              },
-            }
-          : {}),
-        ...(followupEnabled ? { followup } : {}),
-      });
-    } catch (reason) {
-      setFormError((reason as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  }
-  return (
-    <div className="intake-page">
-      <div className="page-heading">
-        <div>
-          <span className="eyebrow">客户建档</span>
-          <h1>新建客户档案</h1>
-          <p>在同一页完成基本资料、听力检查、验配与首次随访；未勾选的部分可稍后补充。</p>
-        </div>
-        <button className="button" type="button" onClick={onCancel}>
-          返回客户列表
-        </button>
-      </div>
-      <form onSubmit={submitIntake}>
-        {formError && (
-          <div className="error" role="alert">
-            {formError}
-          </div>
-        )}
-        <section className="panel padded intake-section">
-          <div className="section-title">
-            <div>
-              <span className="eyebrow">01 · 必填</span>
-              <h2>基本资料</h2>
-            </div>
-            <Users size={20} />
-          </div>
-          <div className="form-grid">
-            <Field label="客户姓名 *">
-              <input
-                required
-                maxLength={40}
-                value={profile.name}
-                onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-              />
-            </Field>
-            <Field label="性别">
-              <select
-                value={profile.gender}
-                onChange={(e) => setProfile({ ...profile, gender: e.target.value })}
-              >
-                {['未填写', '男', '女'].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="出生日期">
-              <input
-                type="date"
-                min="1900-01-01"
-                max={today()}
-                value={profile.birthDate}
-                onChange={(e) => setProfile({ ...profile, birthDate: e.target.value })}
-              />
-            </Field>
-            <Field label="客户电话">
-              <input
-                maxLength={30}
-                value={profile.phone}
-                onChange={(e) => setProfile({ ...profile, phone: e.target.value })}
-                placeholder="填写客户联系电话"
-              />
-            </Field>
-            <Field label="住址" wide>
-              <input
-                maxLength={300}
-                value={profile.address}
-                onChange={(e) => setProfile({ ...profile, address: e.target.value })}
-                placeholder="省、市、区及详细地址"
-              />
-            </Field>
-            <Field label="其他联系人姓名 / 关系">
-              <input
-                maxLength={100}
-                value={profile.contact}
-                onChange={(e) => setProfile({ ...profile, contact: e.target.value })}
-              />
-            </Field>
-            <Field label="其他联系人电话">
-              <input
-                maxLength={30}
-                value={profile.contactPhone}
-                onChange={(e) => setProfile({ ...profile, contactPhone: e.target.value })}
-              />
-            </Field>
-            <Field label="客户来源">
-              <select
-                value={profile.source}
-                onChange={(e) => setProfile({ ...profile, source: e.target.value })}
-              >
-                {['自然到店', '老客转介绍', '社区活动', '线上咨询', '其他'].map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="服务阶段">
-              <select
-                value={profile.status}
-                onChange={(e) => setProfile({ ...profile, status: e.target.value })}
-              >
-                {statuses.slice(1).map((v) => (
-                  <option key={v}>{v}</option>
-                ))}
-              </select>
-            </Field>
-            <Field label="听力与健康情况" wide>
-              <textarea
-                value={profile.history}
-                onChange={(e) => setProfile({ ...profile, history: e.target.value })}
-                placeholder="主诉、耳部病史、既往助听器使用情况…"
-              />
-            </Field>
-            <Field label="聆听需求与期望" wide>
-              <textarea
-                value={profile.needs}
-                onChange={(e) => setProfile({ ...profile, needs: e.target.value })}
-              />
-            </Field>
-          </div>
-        </section>
-        {role === '店主' && (
-          <section className="panel padded intake-section">
-            <div className="section-title">
-              <div>
-                <span className="eyebrow">02 · 可选</span>
-                <h2>听力检查与听力图</h2>
-              </div>
-              <label className="intake-toggle">
-                <input
-                  type="checkbox"
-                  checked={examEnabled}
-                  onChange={(e) => setExamEnabled(e.target.checked)}
-                />{' '}
-                同时录入
-              </label>
-            </div>
-            {examEnabled ? (
-              <HearingEditor value={exam} onChange={setExam} />
-            ) : (
-              <p className="muted">勾选后直接在左右耳听力图上标记 AC、BC 和 UCL。</p>
-            )}
-          </section>
-        )}
-        {role === '店主' && (
-          <section className="panel padded intake-section">
-            <div className="section-title">
-              <div>
-                <span className="eyebrow">03 · 可选</span>
-                <h2>验配信息</h2>
-              </div>
-              <label className="intake-toggle">
-                <input
-                  type="checkbox"
-                  checked={fittingEnabled}
-                  onChange={(e) => setFittingEnabled(e.target.checked)}
-                />{' '}
-                同时录入
-              </label>
-            </div>
-            {fittingEnabled ? (
-              <div className="form-grid">
-                <Field label="验配日期 *">
-                  <input
-                    type="date"
-                    required
-                    max={today()}
-                    value={fitting.date}
-                    onChange={(e) => setFitting({ ...fitting, date: e.target.value })}
-                  />
-                </Field>
-                <Field label="佩戴耳侧">
-                  <select
-                    value={fitting.side}
-                    onChange={(e) => setFitting({ ...fitting, side: e.target.value })}
-                  >
-                    {['双耳', '左耳', '右耳'].map((v) => (
-                      <option key={v}>{v}</option>
-                    ))}
-                  </select>
-                </Field>
-                <FittingDeviceFields
-                  value={fitting}
-                  onChange={(key, value) => setFitting((current) => ({ ...current, [key]: value }))}
-                />
-                <Field label="成交金额（元）">
-                  <input
-                    type="number"
-                    min="0"
-                    max="10000000"
-                    step="0.01"
-                    value={fitting.amount}
-                    onChange={(e) => setFitting({ ...fitting, amount: Number(e.target.value) })}
-                  />
-                </Field>
-                <Field label="保修截止日期">
-                  <input
-                    type="date"
-                    value={fitting.warranty}
-                    onChange={(e) => setFitting({ ...fitting, warranty: e.target.value })}
-                  />
-                </Field>
-                <Field label="调试、验证与交付说明" wide>
-                  <textarea
-                    value={fitting.notes}
-                    onChange={(e) => setFitting({ ...fitting, notes: e.target.value })}
-                  />
-                </Field>
-              </div>
-            ) : (
-              <p className="muted">可填写型号、序列号及保修等资料，未知项目以后再补充。</p>
-            )}
-          </section>
-        )}
-        <section className="panel padded intake-section">
-          <div className="section-title">
-            <div>
-              <span className="eyebrow">04 · 可选</span>
-              <h2>首次随访计划</h2>
-            </div>
-            <label className="intake-toggle">
-              <input
-                type="checkbox"
-                checked={followupEnabled}
-                onChange={(e) => setFollowupEnabled(e.target.checked)}
-              />{' '}
-              同时安排
-            </label>
-          </div>
-          {followupEnabled ? (
-            <div className="form-grid">
-              <Field label="计划日期 *">
-                <input
-                  type="date"
-                  required
-                  value={followup.due}
-                  onChange={(e) => setFollowup({ ...followup, due: e.target.value })}
-                />
-              </Field>
-              <Field label="服务类型">
-                <select
-                  value={followup.type}
-                  onChange={(e) => setFollowup({ ...followup, type: e.target.value })}
-                >
-                  {['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((v) => (
-                    <option key={v}>{v}</option>
-                  ))}
-                </select>
-              </Field>
-              <Field label="计划内容" wide>
-                <textarea
-                  value={followup.note}
-                  onChange={(e) => setFollowup({ ...followup, note: e.target.value })}
-                />
-              </Field>
-            </div>
-          ) : (
-            <p className="muted">可在建档时安排首次回访，也可稍后从客户档案中补充。</p>
-          )}
-        </section>
-        <div className="intake-actions">
-          <span>所有已勾选部分将一次保存到同一位客户档案。</span>
-          <button type="button" className="button" onClick={onCancel}>
-            取消
-          </button>
-          <button type="submit" className="button primary" disabled={saving}>
-            {saving ? '保存中…' : '保存完整档案'}
-          </button>
-        </div>
-      </form>
-    </div>
-  );
-}
-
 export default function App() {
   const [role, setRole] = useState(''),
     [boot, setBoot] = useState(true),
@@ -696,7 +127,14 @@ export default function App() {
     }),
     [sidebarHover, setSidebarHover] = useState(false),
     [dataState, setDataState] = useState<Record<Dataset, LoadState>>(initialDataState),
-    [identity, setIdentity] = useState({ demo: false, name: '', email: '', storeName: '聆讯听力', tenant_id: '', avatar: '' });
+    [identity, setIdentity] = useState({
+      demo: false,
+      name: '',
+      email: '',
+      storeName: '聆讯听力',
+      tenant_id: '',
+      avatar: '',
+    });
 
   const intakeDirty = useRef(false);
   const accountDirty = useRef(false);
@@ -782,11 +220,19 @@ export default function App() {
     const mobile = viewportWidth <= 650;
     const inline = trigger.classList.contains('home-search') && !mobile;
     setSearchMode(inline ? 'inline' : 'command');
-    const width = inline ? Math.min(rect.width, viewportWidth - 24) : Math.min(720, viewportWidth - 24);
-    const left = inline ? Math.max(12, Math.min(rect.left, viewportWidth - width - 12))
+    const width = inline
+      ? Math.min(rect.width, viewportWidth - 24)
+      : Math.min(720, viewportWidth - 24);
+    const left = inline
+      ? Math.max(12, Math.min(rect.left, viewportWidth - width - 12))
       : (viewportWidth - width) / 2;
     const top = inline ? Math.max(12, rect.top) : Math.min(76, Math.max(12, viewportHeight * 0.08));
-    setSearchPosition({ top, left, width, maxHeight: Math.max(155, Math.min(620, viewportHeight - top - 16)) });
+    setSearchPosition({
+      top,
+      left,
+      width,
+      maxHeight: Math.max(155, Math.min(620, viewportHeight - top - 16)),
+    });
   }
   function openSearch(trigger: HTMLButtonElement) {
     searchTriggerRef.current = trigger;
@@ -817,11 +263,12 @@ export default function App() {
       includeRemoved ? api('/customers/removed') : Promise.resolve([]),
       api('/repairs'),
     ]).catch((error) => {
-      if (session === dataSession.current) setDataState((current) => {
-        const next = { ...current };
-        for (const key of keys) if (guards[key]()) next[key] = 'error';
-        return next;
-      });
+      if (session === dataSession.current)
+        setDataState((current) => {
+          const next = { ...current };
+          for (const key of keys) if (guards[key]()) next[key] = 'error';
+          return next;
+        });
       throw error;
     });
     if (session !== dataSession.current) return;
@@ -874,7 +321,11 @@ export default function App() {
       return (
         <div className="data-retry" role="alert">
           <span>这部分内容暂时无法读取</span>
-          <button type="button" className="button small" onClick={() => failed.forEach((key) => loadDataset(key))}>
+          <button
+            type="button"
+            className="button small"
+            onClick={() => failed.forEach((key) => loadDataset(key))}
+          >
             重试
           </button>
         </div>
@@ -894,9 +345,12 @@ export default function App() {
         setError((e as Error).message);
       }
     }
-    api(`/customers/${key}/removed`).then((rows) => {
-      if (selectedCustomerRef.current === key && session === dataSession.current) setRemoved(rows);
-    }).catch(() => {});
+    api(`/customers/${key}/removed`)
+      .then((rows) => {
+        if (selectedCustomerRef.current === key && session === dataSession.current)
+          setRemoved(rows);
+      })
+      .catch(() => {});
   }
   useEffect(() => {
     let cancelled = false;
@@ -914,15 +368,20 @@ export default function App() {
         setError((identityResult.reason as Error).message);
       }
     })()
-      .catch((reason) => { if (!cancelled) setError((reason as Error).message); })
-      .finally(() => { if (!cancelled) setBoot(false); });
-    return () => { cancelled = true; };
+      .catch((reason) => {
+        if (!cancelled) setError((reason as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setBoot(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
   useEffect(() => {
     if (!role || !identity.tenant_id) return;
     const mark = () => {
-      if (document.visibilityState === 'visible')
-        api('/accounts/presence', 'POST').catch(() => {});
+      if (document.visibilityState === 'visible') api('/accounts/presence', 'POST').catch(() => {});
     };
     mark();
     const timer = window.setInterval(mark, 60000);
@@ -939,12 +398,19 @@ export default function App() {
       setDetailError(false);
       setRemoved({ exams: [], fittings: [], repairs: [], followups: [], attachments: [] });
       api(`/customers/${selected}/detail`)
-        .then((data) => { if (!cancelled) setDetail(data); })
+        .then((data) => {
+          if (!cancelled) setDetail(data);
+        })
         .catch((e) => {
-          if (!cancelled) { setDetailError(true); setError(e.message); }
+          if (!cancelled) {
+            setDetailError(true);
+            setError(e.message);
+          }
         });
       api(`/customers/${selected}/removed`)
-        .then((rows) => { if (!cancelled) setRemoved(rows); })
+        .then((rows) => {
+          if (!cancelled) setRemoved(rows);
+        })
         .catch(() => {});
       setExamIndex(0);
     }
@@ -1030,21 +496,27 @@ export default function App() {
   }, [searchOpen]);
   useEffect(() => {
     if (searchOpen || !searchMounted) return;
-    const timer = window.setTimeout(() => {
-      setSearchMounted(false);
-      searchTriggerRef.current?.focus({ preventScroll: true });
-    }, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140);
+    const timer = window.setTimeout(
+      () => {
+        setSearchMounted(false);
+        searchTriggerRef.current?.focus({ preventScroll: true });
+      },
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 140,
+    );
     return () => window.clearTimeout(timer);
   }, [searchOpen, searchMounted]);
   useEffect(() => {
     if (!searchOpen || searchMode !== 'command') return;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    return () => { document.body.style.overflow = previous; };
+    return () => {
+      document.body.style.overflow = previous;
+    };
   }, [searchOpen, searchMode]);
   useEffect(() => {
     if (!searchOpen) return;
-    document.querySelector('.global-search-list > button.active')
+    document
+      .querySelector('.global-search-list > button.active')
       ?.scrollIntoView({ block: 'nearest' });
   }, [searchActive, searchOpen, globalResults]);
   useEffect(() => {
@@ -1083,12 +555,22 @@ export default function App() {
       if (result.logoutUrl) window.location.assign(result.logoutUrl);
       else {
         dataSession.current += 1;
-        setCustomers([]); setFollowups([]); setDevices([]); setRepairs([]);
-        setRemovedCustomers([]); setDetail(null); setDataState(initialDataState);
-        setRole(''); setSelected(null); setEditorKind(''); setEditingField('');
+        setCustomers([]);
+        setFollowups([]);
+        setDevices([]);
+        setRepairs([]);
+        setRemovedCustomers([]);
+        setDetail(null);
+        setDataState(initialDataState);
+        setRole('');
+        setSelected(null);
+        setEditorKind('');
+        setEditingField('');
         accountDirty.current = false;
       }
-    } catch (reason) { setError((reason as Error).message); }
+    } catch (reason) {
+      setError((reason as Error).message);
+    }
   }
   function openCustomer(key: string, nextTab = '概览', record = '', device = '') {
     if (!canLeaveEditor()) return;
@@ -1135,8 +617,7 @@ export default function App() {
             },
       );
     if (kind === 'exam') {
-      const curve = () =>
-        frequencies.map((f) => ({ frequency: f, value: null, noResponse: false, masked: false }));
+      const curve = blankCurve;
       setDraft(
         record
           ? { ...record }
@@ -1524,22 +1005,45 @@ export default function App() {
         <footer className="cf-login-footer">聆讯 · 助听器客户管理</footer>
       </div>
     );
-  if (role && !boot && !identity.tenant_id) return (
-    <div className="account-only-shell cf-shell">
-      <header className="topbar">
-        <div className="brand"><span className="brand-icon"><Ear size={23} /></span><b>聆讯</b></div>
-        <div className="top-actions"><AccountAvatar avatar={identity.avatar} name={identity.name} />
-          <button className="button small" onClick={() => void logoutAccount()}><LogOut size={16} />退出登录</button>
-        </div>
-      </header>
-      <main className="account-only-content">
-        {error && <div className="error" role="alert">{error}</div>}
-        <Accounts api={api} identity={identity} updated={async () => setIdentity(await api('/me'))}
-          switchStore={switchStore} dirty={(value) => { accountDirty.current = value; }}
-          saving={(value) => { accountBusy.current = value; }} />
-      </main>
-    </div>
-  );
+  if (role && !boot && !identity.tenant_id)
+    return (
+      <div className="account-only-shell cf-shell">
+        <header className="topbar">
+          <div className="brand">
+            <span className="brand-icon">
+              <Ear size={23} />
+            </span>
+            <b>聆讯</b>
+          </div>
+          <div className="top-actions">
+            <AccountAvatar avatar={identity.avatar} name={identity.name} />
+            <button className="button small" onClick={() => void logoutAccount()}>
+              <LogOut size={16} />
+              退出登录
+            </button>
+          </div>
+        </header>
+        <main className="account-only-content">
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
+          <Accounts
+            api={api}
+            identity={identity}
+            updated={async () => setIdentity(await api('/me'))}
+            switchStore={switchStore}
+            dirty={(value) => {
+              accountDirty.current = value;
+            }}
+            saving={(value) => {
+              accountBusy.current = value;
+            }}
+          />
+        </main>
+      </div>
+    );
   const navs = [
     ['overview', '工作台', House],
     ['customers', '客户档案', ContactRound],
@@ -1579,52 +1083,77 @@ export default function App() {
           </tr>
         </thead>
         <tbody>
-          {loading ? Array.from({ length: compact ? 4 : 5 }, (_, index) => (
-            <tr className="customer-skeleton-row" key={index}>
-              <td><div className="person"><span className="skeleton-mark avatar" /><div className="skeleton-person"><span className="skeleton-line" /><span className="skeleton-line" /></div></div></td>
-              <td><span className="skeleton-line skeleton-table-main" /><span className="skeleton-line skeleton-table-sub" /></td>
-              <td><span className="skeleton-line skeleton-table-status" /></td>
-              <td><span className="skeleton-line skeleton-table-main" /></td>
-              {!compact && <td><span className="skeleton-line skeleton-table-main" /></td>}
-              <td><ChevronRight size={16} /></td>
-            </tr>
-          )) : list.map((c) => (
-            <tr
-              key={c.id}
-              onClick={() => openCustomer(c.id)}
-              tabIndex={0}
-              onKeyDown={(e) => e.key === 'Enter' && openCustomer(c.id)}
-            >
-              <td>
-                <div className="person">
-                  <span className={'avatar tone-' + (c.name.charCodeAt(0) % 4)}>
-                    {c.name.slice(-2)}
-                  </span>
-                  <div>
-                    <strong>{c.name}</strong>
-                    <small>
-                      {c.gender} ·{' '}
-                      {Number.isFinite(age(c.birthDate)) ? `${age(c.birthDate)} 岁` : '年龄未填写'}
+          {loading
+            ? Array.from({ length: compact ? 4 : 5 }, (_, index) => (
+                <tr className="customer-skeleton-row" key={index}>
+                  <td>
+                    <div className="person">
+                      <span className="skeleton-mark avatar" />
+                      <div className="skeleton-person">
+                        <span className="skeleton-line" />
+                        <span className="skeleton-line" />
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span className="skeleton-line skeleton-table-main" />
+                    <span className="skeleton-line skeleton-table-sub" />
+                  </td>
+                  <td>
+                    <span className="skeleton-line skeleton-table-status" />
+                  </td>
+                  <td>
+                    <span className="skeleton-line skeleton-table-main" />
+                  </td>
+                  {!compact && (
+                    <td>
+                      <span className="skeleton-line skeleton-table-main" />
+                    </td>
+                  )}
+                  <td>
+                    <ChevronRight size={16} />
+                  </td>
+                </tr>
+              ))
+            : list.map((c) => (
+                <tr
+                  key={c.id}
+                  onClick={() => openCustomer(c.id)}
+                  tabIndex={0}
+                  onKeyDown={(e) => e.key === 'Enter' && openCustomer(c.id)}
+                >
+                  <td>
+                    <div className="person">
+                      <span className={'avatar tone-' + (c.name.charCodeAt(0) % 4)}>
+                        {c.name.slice(-2)}
+                      </span>
+                      <div>
+                        <strong>{c.name}</strong>
+                        <small>
+                          {c.gender} ·{' '}
+                          {Number.isFinite(age(c.birthDate))
+                            ? `${age(c.birthDate)} 岁`
+                            : '年龄未填写'}
+                        </small>
+                      </div>
+                    </div>
+                  </td>
+                  <td>
+                    <span>{c.phone || '未填写'}</span>
+                    <small className="subtext">
+                      {[c.contact, c.contactPhone].filter(Boolean).join(' · ') || '暂无其他联系人'}
                     </small>
-                  </div>
-                </div>
-              </td>
-              <td>
-                <span>{c.phone || '未填写'}</span>
-                <small className="subtext">
-                  {[c.contact, c.contactPhone].filter(Boolean).join(' · ') || '暂无其他联系人'}
-                </small>
-              </td>
-              <td>
-                <Badge status={c.status} />
-              </td>
-              <td className="muted">{c.source}</td>
-              {!compact && <td className="muted">{c.created_at.slice(0, 10)}</td>}
-              <td>
-                <ChevronRight size={16} />
-              </td>
-            </tr>
-          ))}
+                  </td>
+                  <td>
+                    <Badge status={c.status} />
+                  </td>
+                  <td className="muted">{c.source}</td>
+                  {!compact && <td className="muted">{c.created_at.slice(0, 10)}</td>}
+                  <td>
+                    <ChevronRight size={16} />
+                  </td>
+                </tr>
+              ))}
         </tbody>
       </table>
       {!loading && !list.length && <Empty text="没有找到符合条件的客户" />}
@@ -1811,7 +1340,11 @@ export default function App() {
             </span>
             <div>
               <b>聆讯</b>
-              {boot ? <small className="skeleton-line boot-store-name" /> : <small>{identity.storeName}</small>}
+              {boot ? (
+                <small className="skeleton-line boot-store-name" />
+              ) : (
+                <small>{identity.storeName}</small>
+              )}
             </div>
           </div>
           <button
@@ -1857,9 +1390,19 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              <AccountAvatar className="profile-avatar" avatar={boot ? '' : identity.avatar} name={boot ? '' : identity.name || role} />
+              <AccountAvatar
+                className="profile-avatar"
+                avatar={boot ? '' : identity.avatar}
+                name={boot ? '' : identity.name || role}
+              />
               <div>
-                <strong>{boot ? <span className="skeleton-line boot-profile-name" /> : identity.name || role}</strong>
+                <strong>
+                  {boot ? (
+                    <span className="skeleton-line boot-profile-name" />
+                  ) : (
+                    identity.name || role
+                  )}
+                </strong>
                 <small>店主</small>
               </div>
               <ChevronRight size={16} />
@@ -1978,7 +1521,11 @@ export default function App() {
                 setAccountAnchor(accountAnchor === event.currentTarget ? null : event.currentTarget)
               }
             >
-              <AccountAvatar className="top-avatar-content" avatar={boot ? '' : identity.avatar} name={boot ? '' : identity.name || role} />
+              <AccountAvatar
+                className="top-avatar-content"
+                avatar={boot ? '' : identity.avatar}
+                name={boot ? '' : identity.name || role}
+              />
             </button>
           </div>
         </header>
@@ -1986,7 +1533,16 @@ export default function App() {
           {Object.values(dataState).includes('error') && (
             <div className="data-load-alert" role="alert">
               <span>部分数据暂时无法读取</span>
-              <button className="button small" onClick={() => (Object.keys(dataState) as Dataset[]).filter((key) => dataState[key] === 'error').forEach((key) => loadDataset(key))}>重试加载</button>
+              <button
+                className="button small"
+                onClick={() =>
+                  (Object.keys(dataState) as Dataset[])
+                    .filter((key) => dataState[key] === 'error')
+                    .forEach((key) => loadDataset(key))
+                }
+              >
+                重试加载
+              </button>
             </div>
           )}
           {error && !editorKind && (
@@ -1997,20 +1553,23 @@ export default function App() {
               </button>
             </div>
           )}
-          {page === 'accounts' && (
-            boot ? <AccountsSkeleton /> : <Accounts
-              api={api}
-              identity={identity}
-              updated={async () => setIdentity(await api('/me'))}
-              switchStore={switchStore}
-              dirty={(value) => {
-                accountDirty.current = value;
-              }}
-              saving={(value) => {
-                accountBusy.current = value;
-              }}
-            />
-          )}
+          {page === 'accounts' &&
+            (boot ? (
+              <AccountsSkeleton />
+            ) : (
+              <Accounts
+                api={api}
+                identity={identity}
+                updated={async () => setIdentity(await api('/me'))}
+                switchStore={switchStore}
+                dirty={(value) => {
+                  accountDirty.current = value;
+                }}
+                saving={(value) => {
+                  accountBusy.current = value;
+                }}
+              />
+            ))}
           {page === 'recycle' && (
             <>
               <div className="page-heading">
@@ -2024,7 +1583,9 @@ export default function App() {
                   <p className="muted retention-note">
                     删除后保留 30 天；到期自动彻底清除，之后无法恢复。
                   </p>
-                  {!dataReady('removed') ? dataFallback(['removed'], 3, <RemovedCustomersSkeleton />) : removedCustomers.length ? (
+                  {!dataReady('removed') ? (
+                    dataFallback(['removed'], 3, <RemovedCustomersSkeleton />)
+                  ) : removedCustomers.length ? (
                     <div className="removed-customer-list">
                       {removedCustomers.map((item) => (
                         <div key={item.id}>
@@ -2061,7 +1622,11 @@ export default function App() {
               customers={customers}
               canEdit={role === '店主' || boot}
               loading={!dataReady(page === 'repairs' ? 'repairs' : 'devices')}
-              loadError={dataState[page === 'repairs' ? 'repairs' : 'devices'] === 'error' ? dataFallback([page === 'repairs' ? 'repairs' : 'devices']) : undefined}
+              loadError={
+                dataState[page === 'repairs' ? 'repairs' : 'devices'] === 'error'
+                  ? dataFallback([page === 'repairs' ? 'repairs' : 'devices'])
+                  : undefined
+              }
               open={openCustomer}
               create={(kind, customerId, deviceId) => {
                 openCustomer(customerId, kind === 'repair' ? '维修记录' : '验配记录');
@@ -2086,12 +1651,19 @@ export default function App() {
                   <h1>查找客户，开始服务</h1>
                   <p>
                     {new Date().toLocaleDateString('zh-CN', {
+                      timeZone: 'Asia/Shanghai',
                       year: 'numeric',
                       month: 'long',
                       day: 'numeric',
                       weekday: 'long',
                     })}{' '}
-                    <span className="dot-sep">·</span> 今日有 {dataReady('followups') ? todayTasks.length : <span className="skeleton-line skeleton-inline-count" />} 项服务待跟进
+                    <span className="dot-sep">·</span> 今日有{' '}
+                    {dataReady('followups') ? (
+                      todayTasks.length
+                    ) : (
+                      <span className="skeleton-line skeleton-inline-count" />
+                    )}{' '}
+                    项服务待跟进
                   </p>
                 </div>
               </div>
@@ -2126,14 +1698,16 @@ export default function App() {
                   <header>
                     <span>最近建档</span>
                   </header>
-                  {dataReady('customers') ? customers.slice(0, 3).map((recent) => (
-                    <button key={recent.id} onClick={() => openCustomer(recent.id)}>
-                      <Clock3 size={16} />
-                      {recent.name}
-                      <small>{recent.status}</small>
-                      <ChevronRight size={16} />
-                    </button>
-                  )) : dataFallback(['customers'], 3, <RecentCustomersSkeleton />)}
+                  {dataReady('customers')
+                    ? customers.slice(0, 3).map((recent) => (
+                        <button key={recent.id} onClick={() => openCustomer(recent.id)}>
+                          <Clock3 size={16} />
+                          {recent.name}
+                          <small>{recent.status}</small>
+                          <ChevronRight size={16} />
+                        </button>
+                      ))
+                    : dataFallback(['customers'], 3, <RecentCustomersSkeleton />)}
                 </section>
               </div>
               <div className="home-section-label">
@@ -2189,53 +1763,66 @@ export default function App() {
                   <div className="panel-heading">
                     <div>
                       <h2>
-                        服务待办 {dataReady('followups') && <span className="count">{pending.length}</span>}
+                        服务待办{' '}
+                        {dataReady('followups') && <span className="count">{pending.length}</span>}
                       </h2>
                     </div>
                     <button className="text-link muted" onClick={() => navigate('followups')}>
                       查看全部 <ArrowRight size={15} />
                     </button>
                   </div>
-                  {dataReady('followups') ? taskRows([...pending].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4)) : dataState.followups === 'error' ? dataFallback(['followups']) : <TaskListSkeleton />}
+                  {dataReady('followups') ? (
+                    taskRows([...pending].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4))
+                  ) : dataState.followups === 'error' ? (
+                    dataFallback(['followups'])
+                  ) : (
+                    <TaskListSkeleton />
+                  )}
                 </section>
                 <div className="dashboard-side">
                   <section className="panel journey-panel">
                     <h2>服务阶段</h2>
-                    {dataReady('customers') ? <div className="journey-bars">
-                      {statuses.slice(1).map((s, i) => {
-                        const count = customers.filter((c) => c.status === s).length;
-                        return (
-                          <button
-                            key={s}
-                            onClick={() => {
-                              navigate('customers');
-                              setFilter(s);
-                            }}
-                          >
-                            <span>
-                              <i
-                                style={{
-                                  background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
-                                }}
-                              />
-                              {s}
-                            </span>
-                            <strong>
-                              {count}
-                              <small>位</small>
-                            </strong>
-                            <div className="bar-track">
-                              <i
-                                style={{
-                                  width: (100 * count) / Math.max(customers.length, 1) + '%',
-                                  background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
-                                }}
-                              />
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div> : dataState.customers === 'error' ? dataFallback(['customers']) : <JourneySkeleton />}
+                    {dataReady('customers') ? (
+                      <div className="journey-bars">
+                        {statuses.slice(1).map((s, i) => {
+                          const count = customers.filter((c) => c.status === s).length;
+                          return (
+                            <button
+                              key={s}
+                              onClick={() => {
+                                navigate('customers');
+                                setFilter(s);
+                              }}
+                            >
+                              <span>
+                                <i
+                                  style={{
+                                    background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
+                                  }}
+                                />
+                                {s}
+                              </span>
+                              <strong>
+                                {count}
+                                <small>位</small>
+                              </strong>
+                              <div className="bar-track">
+                                <i
+                                  style={{
+                                    width: (100 * count) / Math.max(customers.length, 1) + '%',
+                                    background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
+                                  }}
+                                />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : dataState.customers === 'error' ? (
+                      dataFallback(['customers'])
+                    ) : (
+                      <JourneySkeleton />
+                    )}
                   </section>
                 </div>
               </div>
@@ -2248,7 +1835,11 @@ export default function App() {
                     全部客户 <ArrowRight size={15} />
                   </button>
                 </div>
-                {dataReady('customers') ? customerTable(customers.slice(0, 4), true) : dataState.customers === 'error' ? dataFallback(['customers']) : customerTable([], true, true)}
+                {dataReady('customers')
+                  ? customerTable(customers.slice(0, 4), true)
+                  : dataState.customers === 'error'
+                    ? dataFallback(['customers'])
+                    : customerTable([], true, true)}
               </section>
             </>
           )}
@@ -2284,9 +1875,11 @@ export default function App() {
                       >
                         {s}
                         <span>
-                          {!dataReady('customers') ? '…' : s === '全部客户'
-                            ? customers.length
-                            : customers.filter((c) => c.status === s).length}
+                          {!dataReady('customers')
+                            ? '…'
+                            : s === '全部客户'
+                              ? customers.length
+                              : customers.filter((c) => c.status === s).length}
                         </span>
                       </button>
                     ))}
@@ -2300,16 +1893,49 @@ export default function App() {
                     />
                   </label>
                 </div>
-                {dataReady('customers') ? customerTable(filtered) : dataState.customers === 'error' ? dataFallback(['customers']) : customerTable([], false, true)}
+                {dataReady('customers')
+                  ? customerTable(filtered)
+                  : dataState.customers === 'error'
+                    ? dataFallback(['customers'])
+                    : customerTable([], false, true)}
                 <div className="table-footer">
-                  {dataReady('customers') ? `共 ${filtered.length} 位客户` : <span className="skeleton-line skeleton-task-date" />} <span>点击客户查看完整服务档案</span>
+                  {dataReady('customers') ? (
+                    `共 ${filtered.length} 位客户`
+                  ) : (
+                    <span className="skeleton-line skeleton-task-date" />
+                  )}{' '}
+                  <span>点击客户查看完整服务档案</span>
                 </div>
               </section>
             </>
           )}
-          {page === 'customers' && selected && !customer && (
-            dataReady('customers') ? <><div className="page-heading"><h1>客户档案</h1></div><section className="panel"><Empty text="没有找到这位客户" action={<button className="button" onClick={() => navigate('customers')}>返回客户列表</button>} /></section></> : dataState.customers === 'error' ? dataFallback(['customers']) : <CustomerPageSkeleton tab={tab} returnLabel={navs.find((n) => n[0] === originPage)?.[1]} />
-          )}
+          {page === 'customers' &&
+            selected &&
+            !customer &&
+            (dataReady('customers') ? (
+              <>
+                <div className="page-heading">
+                  <h1>客户档案</h1>
+                </div>
+                <section className="panel">
+                  <Empty
+                    text="没有找到这位客户"
+                    action={
+                      <button className="button" onClick={() => navigate('customers')}>
+                        返回客户列表
+                      </button>
+                    }
+                  />
+                </section>
+              </>
+            ) : dataState.customers === 'error' ? (
+              dataFallback(['customers'])
+            ) : (
+              <CustomerPageSkeleton
+                tab={tab}
+                returnLabel={navs.find((n) => n[0] === originPage)?.[1]}
+              />
+            ))}
           {page === 'customers' && customer && (
             <>
               <button className="back" onClick={() => navigate(originPage)}>
@@ -2375,7 +2001,7 @@ export default function App() {
                     {t}
                     {t !== '概览' && (
                       <span>
-                        {detail ?
+                        {detail ? (
                           (
                             {
                               听力检查: detail.exams.length,
@@ -2384,15 +2010,26 @@ export default function App() {
                               随访记录: detail.followups.length,
                               报告附件: detail.attachments.length,
                             } as Record<string, number>
-                          )[t] : <span className="skeleton-line skeleton-tab-count" />
-                        }
+                          )[t]
+                        ) : (
+                          <span className="skeleton-line skeleton-tab-count" />
+                        )}
                       </span>
                     )}
                   </button>
                 ))}
               </div>
               {!detail ? (
-                detailError ? <div className="data-retry" role="alert"><span>档案详情暂时无法读取</span><button className="button small" onClick={() => void loadDetail(customer.id)}>重试</button></div> : <CustomerDetailSkeleton tab={tab} />
+                detailError ? (
+                  <div className="data-retry" role="alert">
+                    <span>档案详情暂时无法读取</span>
+                    <button className="button small" onClick={() => void loadDetail(customer.id)}>
+                      重试
+                    </button>
+                  </div>
+                ) : (
+                  <CustomerDetailSkeleton tab={tab} />
+                )
               ) : (
                 <>
                   {tab === '概览' && editorKind === 'customer' && editor}
@@ -3044,7 +2681,15 @@ export default function App() {
                         <div className="attachment-list">
                           {detail.attachments.map((a) => (
                             <div key={a.id} className="attachment-item">
-                              <a href={'/api/files/' + a.id + '?store=' + encodeURIComponent(identity.tenant_id)} className="attachment">
+                              <a
+                                href={
+                                  '/api/files/' +
+                                  a.id +
+                                  '?store=' +
+                                  encodeURIComponent(identity.tenant_id)
+                                }
+                                className="attachment"
+                              >
                                 <FileText size={24} />
                                 <div>
                                   <strong>{a.name}</strong>
@@ -3166,19 +2811,25 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                {dataReady('followups') ? taskRows(
-                  followups.filter(
-                    (f) =>
-                      taskFilter === '全部' ||
-                      (taskFilter === '今日'
-                        ? !f.completed && f.due === today()
-                        : taskFilter === '已完成'
-                          ? !!f.completed
-                          : taskFilter === '已逾期'
-                            ? !f.completed && f.due < today()
-                            : !f.completed),
-                  ),
-                ) : dataState.followups === 'error' ? dataFallback(['followups']) : <TaskListSkeleton lines={5} />}
+                {dataReady('followups') ? (
+                  taskRows(
+                    followups.filter(
+                      (f) =>
+                        taskFilter === '全部' ||
+                        (taskFilter === '今日'
+                          ? !f.completed && f.due === today()
+                          : taskFilter === '已完成'
+                            ? !!f.completed
+                            : taskFilter === '已逾期'
+                              ? !f.completed && f.due < today()
+                              : !f.completed),
+                    ),
+                  )
+                ) : dataState.followups === 'error' ? (
+                  dataFallback(['followups'])
+                ) : (
+                  <TaskListSkeleton lines={5} />
+                )}
               </section>
             </>
           )}
@@ -3274,72 +2925,92 @@ export default function App() {
               <button className="section-shortcut panel" onClick={() => navigate('warranties')}>
                 <Shield size={19} />
                 <span>查看保修到期设备</span>
-                {dataReady('devices') ? <span className="count">{warrantyAlerts.length}</span> : <span className="skeleton-line skeleton-count" />}
+                {dataReady('devices') ? (
+                  <span className="count">{warrantyAlerts.length}</span>
+                ) : (
+                  <span className="skeleton-line skeleton-count" />
+                )}
                 <ArrowRight size={17} />
               </button>
               <div className="report-grid">
-                {<Distribution
-                  title="客户来源"
-                  subtitle=""
-                  loading={!dataReady('customers')}
-                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
-                  data={[...new Set(customers.map((c) => c.source))].map((s) => ({
-                    label: s || '未填写',
-                    count: customers.filter((c) => c.source === s).length,
-                  }))}
-                />}
-                {<Distribution
-                  title="客户年龄分布"
-                  subtitle="按当前日期与出生日期计算"
-                  loading={!dataReady('customers')}
-                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
-                  data={[
-                    {
-                      label: '40 岁以下',
-                      count: customers.filter((c) => age(c.birthDate) < 40).length,
-                    },
-                    {
-                      label: '40–59 岁',
-                      count: customers.filter(
-                        (c) => age(c.birthDate) >= 40 && age(c.birthDate) < 60,
-                      ).length,
-                    },
-                    {
-                      label: '60–79 岁',
-                      count: customers.filter(
-                        (c) => age(c.birthDate) >= 60 && age(c.birthDate) < 80,
-                      ).length,
-                    },
-                    {
-                      label: '80 岁及以上',
-                      count: customers.filter((c) => age(c.birthDate) >= 80).length,
-                    },
-                    {
-                      label: '未填写',
-                      count: customers.filter((c) => !Number.isFinite(age(c.birthDate))).length,
-                    },
-                  ]}
-                />}
-                {<Distribution
-                  title="服务阶段"
-                  subtitle="每位客户只计入当前阶段"
-                  loading={!dataReady('customers')}
-                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
-                  data={statuses.slice(1).map((s) => ({
-                    label: s,
-                    count: customers.filter((c) => c.status === s).length,
-                  }))}
-                />}
-                {<Distribution
-                  title="随访服务类型"
-                  subtitle="包含待完成与已完成任务"
-                  loading={!dataReady('followups')}
-                  loadError={dataState.followups === 'error' ? dataFallback(['followups']) : undefined}
-                  data={['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((s) => ({
-                    label: s,
-                    count: followups.filter((f) => f.type === s).length,
-                  }))}
-                />}
+                {
+                  <Distribution
+                    title="客户来源"
+                    subtitle=""
+                    loading={!dataReady('customers')}
+                    loadError={
+                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
+                    }
+                    data={[...new Set(customers.map((c) => c.source))].map((s) => ({
+                      label: s || '未填写',
+                      count: customers.filter((c) => c.source === s).length,
+                    }))}
+                  />
+                }
+                {
+                  <Distribution
+                    title="客户年龄分布"
+                    subtitle="按当前日期与出生日期计算"
+                    loading={!dataReady('customers')}
+                    loadError={
+                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
+                    }
+                    data={[
+                      {
+                        label: '40 岁以下',
+                        count: customers.filter((c) => age(c.birthDate) < 40).length,
+                      },
+                      {
+                        label: '40–59 岁',
+                        count: customers.filter(
+                          (c) => age(c.birthDate) >= 40 && age(c.birthDate) < 60,
+                        ).length,
+                      },
+                      {
+                        label: '60–79 岁',
+                        count: customers.filter(
+                          (c) => age(c.birthDate) >= 60 && age(c.birthDate) < 80,
+                        ).length,
+                      },
+                      {
+                        label: '80 岁及以上',
+                        count: customers.filter((c) => age(c.birthDate) >= 80).length,
+                      },
+                      {
+                        label: '未填写',
+                        count: customers.filter((c) => !Number.isFinite(age(c.birthDate))).length,
+                      },
+                    ]}
+                  />
+                }
+                {
+                  <Distribution
+                    title="服务阶段"
+                    subtitle="每位客户只计入当前阶段"
+                    loading={!dataReady('customers')}
+                    loadError={
+                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
+                    }
+                    data={statuses.slice(1).map((s) => ({
+                      label: s,
+                      count: customers.filter((c) => c.status === s).length,
+                    }))}
+                  />
+                }
+                {
+                  <Distribution
+                    title="随访服务类型"
+                    subtitle="包含待完成与已完成任务"
+                    loading={!dataReady('followups')}
+                    loadError={
+                      dataState.followups === 'error' ? dataFallback(['followups']) : undefined
+                    }
+                    data={['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((s) => ({
+                      label: s,
+                      count: followups.filter((f) => f.type === s).length,
+                    }))}
+                  />
+                }
               </div>
             </>
           )}
@@ -3352,19 +3023,41 @@ export default function App() {
               </div>
               <div className="detail-grid">
                 <section className="panel padded">
-                  <h2>{boot ? <span className="skeleton-line account-skeleton-title" /> : identity.storeName}</h2>
+                  <h2>
+                    {boot ? (
+                      <span className="skeleton-line account-skeleton-title" />
+                    ) : (
+                      identity.storeName
+                    )}
+                  </h2>
                   <dl className="stacked-info">
                     <div>
                       <dt>当前角色</dt>
-                      <dd>{boot ? <span className="skeleton-line account-skeleton-title" /> : role}</dd>
+                      <dd>
+                        {boot ? <span className="skeleton-line account-skeleton-title" /> : role}
+                      </dd>
                     </div>
                     <div>
                       <dt>数据空间</dt>
-                      <dd>{boot ? <span className="skeleton-line account-skeleton-title" /> : identity.storeName}</dd>
+                      <dd>
+                        {boot ? (
+                          <span className="skeleton-line account-skeleton-title" />
+                        ) : (
+                          identity.storeName
+                        )}
+                      </dd>
                     </div>
                     <div>
                       <dt>版本</dt>
-                      <dd>{boot ? <span className="skeleton-line account-skeleton-action" /> : identity.demo ? '本地演示' : '1.0'}</dd>
+                      <dd>
+                        {boot ? (
+                          <span className="skeleton-line account-skeleton-action" />
+                        ) : identity.demo ? (
+                          '本地演示'
+                        ) : (
+                          '1.0'
+                        )}
+                      </dd>
                     </div>
                   </dl>
                   <button className="button full" onClick={() => navigate('accounts')}>
@@ -3391,9 +3084,13 @@ export default function App() {
                   <div className="notice">
                     <ShieldCheck size={20} />
                     <p>
-                      {boot ? <span className="skeleton-line account-skeleton-subtitle" /> : identity.demo
-                        ? '演示环境仅用于虚构数据体验。'
-                        : `当前账户：${identity.name}（${identity.email}）。请定期备份数据库及报告附件。`}
+                      {boot ? (
+                        <span className="skeleton-line account-skeleton-subtitle" />
+                      ) : identity.demo ? (
+                        '演示环境仅用于虚构数据体验。'
+                      ) : (
+                        `当前账户：${identity.name}（${identity.email}）。请定期备份数据库及报告附件。`
+                      )}
                     </p>
                   </div>
                 </section>
@@ -3421,7 +3118,9 @@ export default function App() {
       )}
       {searchMounted && (
         <div
-          className={'global-search-backdrop search-' + searchMode + (!searchOpen ? ' search-closing' : '')}
+          className={
+            'global-search-backdrop search-' + searchMode + (!searchOpen ? ' search-closing' : '')
+          }
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setSearchOpen(false);
           }}
@@ -3434,12 +3133,17 @@ export default function App() {
             aria-label="搜索客户信息"
             onKeyDown={(event) => {
               if (event.key !== 'Tab') return;
-              const nodes = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('input, button:not(:disabled)'));
-              const first = nodes[0], last = nodes[nodes.length - 1];
+              const nodes = Array.from(
+                event.currentTarget.querySelectorAll<HTMLElement>('input, button:not(:disabled)'),
+              );
+              const first = nodes[0],
+                last = nodes[nodes.length - 1];
               if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault(); last?.focus();
+                event.preventDefault();
+                last?.focus();
               } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault(); first?.focus();
+                event.preventDefault();
+                first?.focus();
               }
             }}
           >
@@ -3474,129 +3178,70 @@ export default function App() {
                 }}
               />
               <button aria-label="关闭搜索" onClick={() => setSearchOpen(false)}>
-                {searchMode === 'inline' ? <><kbd>Ctrl</kbd><kbd>K</kbd></> : <kbd>Esc</kbd>}
+                {searchMode === 'inline' ? (
+                  <>
+                    <kbd>Ctrl</kbd>
+                    <kbd>K</kbd>
+                  </>
+                ) : (
+                  <kbd>Esc</kbd>
+                )}
               </button>
             </div>
             <div className="global-search-results">
-            <div className="global-search-list">
-              <div className="global-search-caption">
-                {globalQuery.trim()
-                  ? searchError
+              <div className="global-search-list">
+                <div className="global-search-caption">
+                  {globalQuery.trim()
                     ? searchError
-                    : searchBusy
-                      ? '正在查找…'
-                      : `搜索结果 · ${globalResults.length} 位客户`
-                  : '最近建档的客户'}
-              </div>
-              {(globalQuery.trim() ? globalResults : customers.slice(0, 6)).map((entry, index) => (
-                <button
-                  className={searchActive === index ? 'active' : ''}
-                  key={entry.id}
-                  onMouseEnter={() => setSearchActive(index)}
-                  onClick={() => openCustomer(entry.id)}
-                >
-                  <ContactRound className="search-result-icon" size={19} strokeWidth={1.5} />
-                  <span className="search-result-content">
-                    <strong>{entry.name}</strong>
-                    <small>
-                      <span aria-hidden="true">—</span> {entry.phone || entry.status}
-                    </small>
-                  </span>
-                  <span className="search-result-meta">
-                    <ArrowRight size={18} />
-                  </span>
-                </button>
-              ))}
-              {!searchBusy && !searchError && globalQuery.trim() && !globalResults.length && (
-                <div className="search-no-results">
-                  没有找到相关客户。请尝试姓名、电话、设备型号或服务记录中的词语。
+                      ? searchError
+                      : searchBusy
+                        ? '正在查找…'
+                        : `搜索结果 · ${globalResults.length} 位客户`
+                    : '最近建档的客户'}
                 </div>
-              )}
-            </div>
-            <footer>
-              <span>
-                <kbd>↑</kbd>
-                <kbd>↓</kbd> 选择结果
-              </span>
-              <span>
-                <kbd>↵</kbd> 打开
-              </span>
-              <span>
-                <kbd>Esc</kbd> 关闭
-              </span>
-            </footer>
+                {(globalQuery.trim() ? globalResults : customers.slice(0, 6)).map(
+                  (entry, index) => (
+                    <button
+                      className={searchActive === index ? 'active' : ''}
+                      key={entry.id}
+                      onMouseEnter={() => setSearchActive(index)}
+                      onClick={() => openCustomer(entry.id)}
+                    >
+                      <ContactRound className="search-result-icon" size={19} strokeWidth={1.5} />
+                      <span className="search-result-content">
+                        <strong>{entry.name}</strong>
+                        <small>
+                          <span aria-hidden="true">—</span> {entry.phone || entry.status}
+                        </small>
+                      </span>
+                      <span className="search-result-meta">
+                        <ArrowRight size={18} />
+                      </span>
+                    </button>
+                  ),
+                )}
+                {!searchBusy && !searchError && globalQuery.trim() && !globalResults.length && (
+                  <div className="search-no-results">
+                    没有找到相关客户。请尝试姓名、电话、设备型号或服务记录中的词语。
+                  </div>
+                )}
+              </div>
+              <footer>
+                <span>
+                  <kbd>↑</kbd>
+                  <kbd>↓</kbd> 选择结果
+                </span>
+                <span>
+                  <kbd>↵</kbd> 打开
+                </span>
+                <span>
+                  <kbd>Esc</kbd> 关闭
+                </span>
+              </footer>
             </div>
           </section>
         </div>
       )}
     </div>
-  );
-}
-function Stat({
-  onClick,
-  label,
-  value,
-  unit,
-  detail,
-  icon,
-  warning = false,
-  loading = false,
-}: {
-  onClick?: () => void;
-  label: string;
-  value: number;
-  unit: string;
-  detail: string;
-  icon: ReactNode;
-  warning?: boolean;
-  loading?: boolean;
-}) {
-  return (
-    <button type="button" onClick={onClick} disabled={loading} className={'stat ' + (warning ? 'warning' : '')}>
-      <div className="stat-top">
-        <span>{label}</span>
-        {icon}
-      </div>
-      <div className="stat-value">
-        {loading ? <span className="skeleton-line skeleton-number" role="status" aria-label={`${label}正在加载`} /> : <>{value}<small>{unit}</small></>}
-      </div>
-      <p>{detail}</p>
-    </button>
-  );
-}
-function Distribution({
-  title,
-  subtitle,
-  data,
-  loading = false,
-  loadError,
-}: {
-  title: string;
-  subtitle: string;
-  data: { label: string; count: number }[];
-  loading?: boolean;
-  loadError?: ReactNode;
-}) {
-  const total = data.reduce((n, d) => n + d.count, 0);
-  return (
-    <section className="panel padded">
-      <h2>{title}</h2>
-      {subtitle && <p className="muted">{subtitle}</p>}
-      {loadError || <div className="distribution" aria-busy={loading}>
-        {(loading && !data.length ? Array.from({ length: 4 }, (_, i) => ({ label: '', count: 0, key: i })) : data).map((d, i) => (
-          <div key={d.label || i}>
-            <div>
-              <span>{d.label || (loading ? <span className="skeleton-line skeleton-task-name" /> : '')}</span>
-              <strong>
-                {loading ? <span className="skeleton-line skeleton-distribution-count" /> : <>{d.count} <small>({total ? Math.round((d.count / total) * 100) : 0}%)</small></>}
-              </strong>
-            </div>
-            <div className="bar-track">
-              {loading ? <span className="skeleton-line skeleton-bar" /> : <i style={{ width: total ? (d.count / total) * 100 + '%' : '0%' }} />}
-            </div>
-          </div>
-        ))}
-      </div>}
-    </section>
   );
 }

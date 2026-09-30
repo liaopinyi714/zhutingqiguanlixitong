@@ -68,7 +68,7 @@ rclone copy backups/2026-09-27T10-00-00-000Z/files hearing-r2-restore:hearing-ca
 rclone check backups/2026-09-27T10-00-00-000Z/files hearing-r2-restore:hearing-care-restore-20260927 --download --one-way
 ```
 
-`check --download` 会实际下载比对文件，消耗 R2 读取操作。恢复后核对客户与附件行数、几份听力图和报告内容。SQL 含原始 `tenant_id`，因此员工配置必须保持对应门店 ID。
+`check --download` 会实际下载比对文件，消耗 R2 读取操作。恢复后核对客户与附件行数、几份听力图和报告内容。SQL 含原始 `tenant_id`、stores、accounts 和 store_memberships，应整体保留这些关联。提供者的 Access Allow 策略与 STAFF_ACCOUNTS Secret 不在数据库备份内，需要单独安全保存并恢复；新账户不必在 Secret 绑定门店，实际成员关系以恢复后的 D1 为准。
 
 5. 检查新库中的 `d1_migrations` 记录。本版本已验证 Wrangler 本地 SQL 导出包含该表；如果所用导出方式未带迁移历史，先核对结构，再由维护者补齐已应用迁移记录，避免将初始建表重复应用到恢复库。
 6. 在已启用 Access 的隔离 Worker 上验证恢复副本；该验证环境暂停 Cron，避免旧快照中的到期记录立即清理。核对完成后，在停写窗口将正式配置中的 D1 ID/名称与 R2 桶名切换为恢复目标，运行配置检查和部署。
@@ -82,4 +82,4 @@ rclone check backups/2026-09-27T10-00-00-000Z/files hearing-r2-restore:hearing-c
 
 ## 迁移到其他服务商
 
-SQLite/SQL 与独立附件路径都可导出。迁到其他 SQLite 平台可复用大部分结构；PostgreSQL/MySQL 需转换 SQL 方言和 JSON 查询。R2 使用 S3 兼容接口，可通过 rclone 复制到新的对象存储。认证集中在 `server/auth.ts`，更换身份提供商时替换这一层；API 和业务校验可继续复用，但 Hono 的运行入口、数据库和文件绑定需要适配，不能声称零修改迁移。
+SQLite/SQL 与独立附件路径都可导出。迁到其他 SQLite 平台可复用大部分结构；PostgreSQL/MySQL 需转换 SQL 方言和 JSON 查询。R2 使用 S3 兼容接口，可通过 rclone 复制到新的对象存储。JWT 验证集中在 `server/auth.ts`，请求权限边界在 `server/http.ts`；更换身份提供商时适配这两层。API 和业务校验可继续复用，但 Hono 的运行入口、数据库和文件绑定需要适配，不能声称零修改迁移。详见 [架构](ARCHITECTURE.md) 与 [数据模型](DATA-MODEL.md)。

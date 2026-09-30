@@ -13,7 +13,9 @@ export function configErrors(config) {
     errors.push('填写 Access 应用的 64 位 AUD');
   const db = config.d1_databases?.find((item) => item.binding === 'DB');
   if (
-    !/^[a-f0-9-]{36}$/i.test(db?.database_id || '') ||
+    !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(
+      db?.database_id || '',
+    ) ||
     db.database_id === '00000000-0000-0000-0000-000000000000'
   )
     errors.push('填写正式 D1 Database ID');

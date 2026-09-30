@@ -120,6 +120,31 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  it('多人初始门店配置使用有界批量语句，未超过 D1 Free 的查询限制', async () => {
+    const roster = [
+      owner,
+      ...Array.from({ length: 25 }, (_, i) => ({
+        ...owner,
+        email: `peer${i}@example.com`,
+        name: `店主${i}`,
+      })),
+    ];
+    env.STAFF_ACCOUNTS = JSON.stringify(roster);
+    const batch = vi.spyOn(env.DB, 'batch');
+    const jwt = await token();
+    expect((await req('/me', jwt)).status).toBe(200);
+    expect(batch.mock.calls).toHaveLength(1);
+    expect((batch.mock.calls[0][0] as unknown[]).length).toBe(4);
+    expect((db.prepare('SELECT COUNT(*) n FROM store_memberships').get() as any).n).toBe(26);
+    expect((db.prepare('SELECT COUNT(*) n FROM accounts').get() as any).n).toBe(26);
+    await req('/accounts/stores/store-001/leave', jwt, 'POST');
+    const second = await token({ email: 'peer0@example.com' });
+    await req('/me', second);
+    expect(
+      (db.prepare('SELECT enabled FROM store_memberships WHERE email=?').get(owner.email) as any)
+        .enabled,
+    ).toBe(0);
+  });
   it('移除初始门店配置不改变已有成员关系，账户和门店权限独立', async () => {
     const jwt = await token();
     await req('/me', jwt);
@@ -728,6 +753,10 @@ describe('正式环境', () => {
     config.account_id = 'b'.repeat(32);
     config.vars.ACCESS_TEAM_DOMAIN = 'test.cloudflareaccess.com';
     config.vars.ACCESS_AUD = audience;
+    config.d1_databases[0].database_id = '1'.repeat(36);
+    expect(configErrors(config)).toEqual(['填写正式 D1 Database ID']);
+    config.d1_databases[0].database_id = '00000000-0000-0000-0000-000000000000';
+    expect(configErrors(config)).toEqual(['填写正式 D1 Database ID']);
     config.d1_databases[0].database_id = '11111111-1111-4111-8111-111111111111';
     expect(configErrors(config)).toEqual([]);
     config.d1_databases[0].migrations_dir = 'migrations';

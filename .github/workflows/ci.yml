@@ -16,6 +16,5 @@ jobs:
         with:
           version: 11.19.0
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-      - run: pnpm build
+      - run: pnpm check
       - run: pnpm exec wrangler deploy --dry-run --outdir .deploy-dry-run

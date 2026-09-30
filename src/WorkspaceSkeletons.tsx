@@ -15,7 +15,7 @@ import {
   Wrench,
 } from 'lucide-react';
 import { HearingEditor } from './HearingEditor';
-import { frequencies } from '../server/domain';
+import { blankCurve as emptyCurve } from '../shared/hearing';
 import { customerTabs } from './workspace';
 
 const line = (className = '') => <span className={'skeleton-line ' + className} />;
@@ -25,8 +25,6 @@ const action = (text: string, primary = false) => (
     {text}
   </button>
 );
-const emptyCurve = () =>
-  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
 const emptyExam = {
   date: '',
   right: emptyCurve(),

@@ -11,5 +11,5 @@
     "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types", "vite/client"]
   },
-  "include": ["src", "server"]
+  "include": ["src", "server", "shared"]
 }

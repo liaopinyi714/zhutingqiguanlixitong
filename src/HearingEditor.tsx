@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { frequencies, pta } from '../server/domain';
+import { blankCurve as blank, editableFrequencies, pta } from '../shared/hearing';
+import { today } from './format';
 
 type Point = { frequency: number; value: number | null; masked: boolean; noResponse: boolean };
 export type HearingExam = {
@@ -16,9 +17,6 @@ export type HearingExam = {
   conclusion: string;
 };
 type CurveKey = 'right' | 'left' | 'boneRight' | 'boneLeft' | 'uclRight' | 'uclLeft';
-const editableFrequencies = [250, 500, 1000, 2000, 4000, 8000];
-const blank = () =>
-  frequencies.map((frequency) => ({ frequency, value: null, masked: false, noResponse: false }));
 const x = (frequency: number) => 48 + Math.log2(frequency / 250) * 68;
 const y = (value: number) => 28 + ((value + 10) * 360) / 130;
 
@@ -273,7 +271,7 @@ export function HearingEditor({
             type="date"
             required
             value={value.date}
-            max={new Date().toLocaleDateString('sv-SE')}
+            max={today()}
             disabled={!onChange}
             onChange={(e) => onChange?.({ ...value, date: e.target.value })}
           />

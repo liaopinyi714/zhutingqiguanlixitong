@@ -3,8 +3,8 @@ import { Pencil, X } from 'lucide-react';
 import { Field, FittingDeviceFields } from './Fields';
 import { deviceSerial } from './workspace';
 import type { Customer, Detail } from './types';
-const today = () => new Date().toLocaleDateString('sv-SE');
-const statuses = ['全部客户', '待评估', '试戴中', '已验配', '长期随访'];
+import { today } from './format';
+import { statuses } from './ui';
 type Props = {
   kind: string;
   draft: any;

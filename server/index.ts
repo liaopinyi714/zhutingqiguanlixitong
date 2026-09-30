@@ -10,125 +10,14 @@ import {
   canWrite,
 } from './domain';
 import { purgeExpiredRecords, retentionCutoff } from './retention';
-import { bodyLimit } from 'hono/body-limit';
-import { accessSession, AuthError, isLocalDemo, type AuthEnv, type Session } from './auth';
-import { accountRoutes, resolveAccount } from './accounts';
-type Env = AuthEnv & { DB: D1Database; FILES: R2Bucket };
-export const app = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
+import { isLocalDemo } from './auth';
+import { accountRoutes } from './accounts';
+import { installHttpBoundary } from './http';
+import { exportRoutes } from './exports';
+import type { Env, AppContext } from './types';
+export const app = new Hono<AppContext>();
 const id = () => crypto.randomUUID();
-app.onError((err, c) => {
-  if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
-  if (err instanceof AuthError) return c.json({ error: err.message }, err.status);
-  // Do not log query values, customer content, tokens or attachment names.
-  console.error('request_failed', { path: c.req.routePath, kind: err.name });
-  return c.json({ error: '服务暂时不可用，请稍后重试。' }, 500);
-});
-app.use('/api/*', async (c, next) => {
-  c.header('Cache-Control', 'no-store');
-  c.header('X-Content-Type-Options', 'nosniff');
-  c.header('Referrer-Policy', 'no-referrer');
-  c.header('X-Frame-Options', 'DENY');
-  const demo = isLocalDemo(c.env, c.req.url);
-  if (!['GET', 'HEAD'].includes(c.req.method)) {
-    const origin = c.req.header('Origin');
-    if (
-      origin &&
-      origin !== new URL(c.req.url).origin &&
-      !(demo && origin === 'http://127.0.0.1:5173')
-    )
-      return c.json({ error: '请求来源不受信任' }, 403);
-    if (!demo && (!origin || c.req.header('X-Requested-With') !== 'hearing-care'))
-      return c.json({ error: '请求校验失败，请刷新后重试' }, 403);
-  }
-  if (c.req.path === '/api/config') return next();
-  // Logging out must remain possible after the operator revokes the identity
-  // or a colleague removes its last store membership. Origin checks still apply.
-  if (c.req.path === '/api/logout') return next();
-  if (c.req.path === '/api/login') {
-    if (!demo) return c.json({ error: '正式环境不支持演示角色登录' }, 403);
-    return next();
-  }
-  // The cookie is only a default for a newly opened page. Existing tabs bind
-  // requests to their displayed store, and still undergo membership checks.
-  const explicitStore =
-    c.req.header('X-Hearing-Store') ??
-    (c.req.path.startsWith('/api/files/') ? c.req.query('store') : undefined);
-  if (
-    explicitStore !== undefined &&
-    explicitStore !== '' &&
-    !/^[a-zA-Z0-9_-]{1,64}$/.test(explicitStore)
-  )
-    return c.json({ error: '门店标识无效' }, 400);
-  const selectedStore = explicitStore ?? getCookie(c, 'hearing_store');
-  const mayRecover =
-    c.req.path === '/api/me' ||
-    c.req.path === '/api/accounts/stores' ||
-    /^\/api\/accounts\/stores\/[^/]+\/switch$/.test(c.req.path);
-  if (!demo) {
-    const lookup = async (email: string) => {
-      try {
-        return await resolveAccount(c.env, email, false, selectedStore);
-      } catch (error) {
-        if (
-          explicitStore !== undefined ||
-          !selectedStore ||
-          !mayRecover ||
-          !(error instanceof AuthError)
-        )
-          throw error;
-        deleteCookie(c, 'hearing_store', { path: '/' });
-        return resolveAccount(c.env, email);
-      }
-    };
-    c.set('session', await accessSession(c.req.raw, c.env, lookup));
-    return next();
-  }
-  const token = getCookie(c, 'hearing_session');
-  const s = token
-    ? await c.env.DB.prepare('SELECT role,tenant_id FROM sessions WHERE token=? AND expires_at>?')
-        .bind(token, Date.now())
-        .first<{ role: string; tenant_id: string }>()
-    : null;
-  if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
-  try {
-    c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore));
-  } catch (error) {
-    if (
-      explicitStore !== undefined ||
-      !selectedStore ||
-      !mayRecover ||
-      !(error instanceof AuthError)
-    )
-      throw error;
-    deleteCookie(c, 'hearing_store', { path: '/' });
-    c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true));
-  }
-  await next();
-});
-app.use('/api/*', async (c, next) =>
-  bodyLimit({
-    maxSize: c.req.path.endsWith('/attachments') ? 11 * 1024 * 1024 : 128 * 1024,
-    onError: (ctx) => ctx.json({ error: '提交内容过大，请缩小文件或减少文本' }, 413),
-  })(c, next),
-);
-app.use('/api/*', async (c, next) => {
-  const personal =
-    ['/api/config', '/api/login', '/api/me', '/api/logout', '/api/auth/start'].includes(
-      c.req.path,
-    ) ||
-    c.req.path === '/api/accounts' ||
-    c.req.path.startsWith('/api/accounts/');
-  if (!personal && !c.get('session')?.tenant_id)
-    return c.json({ error: '请先加入或创建门店，再访问客户和业务资料' }, 403);
-  if (
-    !personal &&
-    !['GET', 'HEAD'].includes(c.req.method) &&
-    !isLocalDemo(c.env, c.req.url) &&
-    !c.req.header('X-Hearing-Store')
-  )
-    return c.json({ error: '页面版本已更新，请刷新后再保存资料' }, 409);
-  return next();
-});
+installHttpBoundary(app);
 app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
 app.get('/api/auth/start', (c) => c.redirect('/'));
 app.post('/api/login', async (c) => {
@@ -910,78 +799,7 @@ app.get('/api/files/:id', async (c) => {
     },
   });
 });
-app.get('/api/export', async (c) => {
-  const s = c.get('session');
-  if (s.role !== '店主') return c.json({ error: '只有店主可以导出全部资料' }, 403);
-  const tables = [
-    'customers',
-    'exams',
-    'fittings',
-    'repairs',
-    'followups',
-    'attachments',
-    'audit',
-    'device_brands',
-    'device_series',
-    'device_models',
-  ];
-  const rows = await c.env.DB.batch(
-    tables.map((t) => c.env.DB.prepare(`SELECT * FROM ${t} WHERE tenant_id=?`).bind(s.tenant_id)),
-  );
-  return c.json({
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    note: '附件元数据已包含；文件需在客户档案中单独下载。',
-    ...Object.fromEntries(tables.map((t, i) => [t, rows[i].results])),
-  });
-});
-// Spreadsheet exports are a deliberately smaller, active-record snapshot. The
-// original JSON endpoint above remains the complete machine-readable backup.
-app.get('/api/export/spreadsheet', async (c) => {
-  const s = c.get('session');
-  if (s.role !== '店主') return c.json({ error: '只有店主可以导出客户表格' }, 403);
-  const tenant = s.tenant_id;
-  const [customers, exams, fittings, repairs, followups] = await c.env.DB.batch([
-    c.env.DB.prepare(
-      `SELECT id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,created_at
-      FROM customers WHERE tenant_id=? AND deleted_at IS NULL ORDER BY name,id`,
-    ).bind(tenant),
-    c.env.DB.prepare(
-      `WITH ranked AS (
-      SELECT e.id,e.customer_id,e.date,e.data,
-        ROW_NUMBER() OVER (PARTITION BY e.customer_id ORDER BY e.date DESC,e.created_at DESC,e.id DESC) AS rank
-      FROM exams e JOIN customers c ON c.id=e.customer_id AND c.tenant_id=e.tenant_id AND c.deleted_at IS NULL
-      WHERE e.tenant_id=? AND e.deleted_at IS NULL
-    ) SELECT id,customer_id,date,data FROM ranked WHERE rank=1 ORDER BY customer_id`,
-    ).bind(tenant),
-    c.env.DB.prepare(
-      `SELECT f.id,f.customer_id,f.date,f.data FROM fittings f
-      JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL
-      WHERE f.tenant_id=? AND f.deleted_at IS NULL
-      ORDER BY f.customer_id,f.date DESC,f.created_at DESC,f.id DESC`,
-    ).bind(tenant),
-    c.env.DB.prepare(
-      `SELECT r.id,r.customer_id,r.fitting_id,r.occurred_date,r.received_date,r.completed_date,
-      r.status,r.problem,r.work_done,r.parts,r.price,r.warranty_covered FROM repairs r
-      JOIN customers c ON c.id=r.customer_id AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
-      JOIN fittings f ON f.id=r.fitting_id AND f.customer_id=r.customer_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
-      WHERE r.tenant_id=? AND r.deleted_at IS NULL ORDER BY r.customer_id,r.occurred_date DESC,r.id DESC`,
-    ).bind(tenant),
-    c.env.DB.prepare(
-      `SELECT u.id,u.customer_id,u.due,u.type,u.completed,u.completed_at,u.result
-      FROM followups u JOIN customers c ON c.id=u.customer_id AND c.tenant_id=u.tenant_id AND c.deleted_at IS NULL
-      WHERE u.tenant_id=? AND u.deleted_at IS NULL ORDER BY u.customer_id,u.due DESC,u.id DESC`,
-    ).bind(tenant),
-  ]);
-  return c.json({
-    exportedAt: new Date().toISOString(),
-    customers: customers.results,
-    exams: exams.results,
-    fittings: fittings.results,
-    repairs: repairs.results,
-    followups: followups.results,
-  });
-});
+app.route('/api/export', exportRoutes);
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
 export default {
   fetch(request: Request, env: Env, ctx: ExecutionContext) {

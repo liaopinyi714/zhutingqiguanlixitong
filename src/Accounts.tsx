@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AccountAvatar, avatarThumbnail } from './AccountAvatar';
 import { RequestOrder } from './requestOrder';
+import { BUSINESS_TIME_ZONE, DAY_MS, RETENTION_DAYS, timestamp } from '../shared/calendar';
 
 type Account = {
   email: string;
@@ -407,9 +408,10 @@ export function Accounts({
     }
   }
   function expiresAt(date: string) {
-    return new Date(
-      new Date(date.replace(' ', 'T') + 'Z').getTime() + 30 * 86400000,
-    ).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+    return new Date(timestamp(date).getTime() + RETENTION_DAYS * DAY_MS).toLocaleDateString(
+      'zh-CN',
+      { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' },
+    );
   }
   async function saveStore(event: React.FormEvent) {
     event.preventDefault();

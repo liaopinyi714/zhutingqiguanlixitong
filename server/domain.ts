@@ -1,12 +1,13 @@
 import { z } from 'zod';
+import { frequencies } from '../shared/hearing';
+import { today } from '../shared/calendar';
+export { frequencies, pta } from '../shared/hearing';
 const dateSchema = z.string().date();
 export const customerSchema = z.object({
   name: z.string().trim().min(1).max(40),
   gender: z.enum(['男', '女', '未填写']),
   birthDate: z.union([
-    dateSchema.refine(
-      (value) => value >= '1900-01-01' && value <= new Date().toISOString().slice(0, 10),
-    ),
+    dateSchema.refine((value) => value >= '1900-01-01' && value <= today()),
     z.literal(''),
   ]),
   phone: z.string().trim().max(30),
@@ -18,7 +19,6 @@ export const customerSchema = z.object({
   history: z.string().max(4000).default(''),
   needs: z.string().max(4000).default(''),
 });
-export const frequencies = [125, 250, 500, 750, 1000, 1500, 2000, 3000, 4000, 6000, 8000];
 export const pointSchema = z
   .object({
     frequency: z.number().refine((n) => frequencies.includes(n)),
@@ -97,12 +97,6 @@ export const repairSchema = z
   })
   .refine((r) => !r.receivedDate || r.receivedDate >= r.occurredDate)
   .refine((r) => !r.completedDate || r.completedDate >= (r.receivedDate || r.occurredDate));
-export function pta(points: { frequency: number; value: number | null; noResponse?: boolean }[]) {
-  const selected = [500, 1000, 2000, 4000].map((f) => points.find((p) => p.frequency === f));
-  return selected.some((p) => !p || p.value === null || p.noResponse)
-    ? null
-    : Math.round((selected.reduce((n, p) => n + p!.value!, 0) / 4) * 10) / 10;
-}
 export function canWrite(role: string, _resource: string) {
   return role === '店主';
 }

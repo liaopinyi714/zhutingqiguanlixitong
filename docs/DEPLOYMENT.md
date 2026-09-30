@@ -2,7 +2,7 @@
 
 如果你希望只通过 Cloudflare 与 GitHub 网页完成首次部署，请改用 [网页操作指南](DEPLOYMENT-GUI.md)。本文保留本机命令行及 GitHub Actions 的部署方式。
 
-核对日期：2026-09-27。适用于本仓库 1.0 版本。业务功能与已验收 Demo 一致；正式版使用员工身份登录、独立空数据库和私有报告存储。本文先给出一次性部署，再说明更新、备份和迁移。
+核对日期：2026-09-30。适用于当前 main 版本。正式版使用提供者开通的邮箱身份、独立账户、多门店成员关系和私有报告存储。本文先给出一次性部署，再说明更新、备份和迁移；日常账户与门店操作见 [运行维护](OPERATIONS.md)。
 
 ## 1. 使用哪些服务、是否收费
 
@@ -113,7 +113,7 @@ pnpm configure
 pnpm db:production
 ```
 
-检查提示中的资源确实是 `hearing-care-production`，确认应用迁移。首次应应用 `0001_initial.sql` 和 `0002_query_indexes.sql`。正式数据库保持零客户，之后由员工录入。
+检查提示中的资源确实是 `hearing-care-production`，确认应用迁移。首次应依次应用 `migrations-production/` 中 `0001_initial.sql` 至 `0007_independent_accounts.sql` 的全部七个文件；后续新增迁移也应执行。正式数据库保持零客户，之后由员工录入。
 
 `pnpm db:local` 只服务本地演示；`pnpm db:production` 才操作远程正式库。不要将正式迁移应用到 Demo 库或其他已有业务库。
 
@@ -137,7 +137,7 @@ Copy-Item config/staff.example.json config/staff.local.json
 ]
 ```
 
-`role` 填 `店主`，前台和验配师身份已停用。同一门店所有员工使用相同 `tenantId` 和 `storeName`。**`tenantId` 是数据归属标识，开始使用后不要随意更改**；改门店显示名称只改 `storeName`。
+`role` 填 `店主`，前台和验配师身份已停用。配置初始同店成员时使用相同 `tenantId` 和 `storeName`，也可同时省略这两项，之后在网站加入或新建门店。**`tenantId` 是数据归属标识，开始使用后不要随意更改**。正式使用后的名称和成员关系在 D1；改门店名使用网站账户管理中的门店更名，不能靠修改 Secret 的 `storeName` 更新已有门店。
 
 该文件已经被 Git 忽略。运行：
 
@@ -152,7 +152,7 @@ pnpm staff:upload
 ### 5.4 发布网站
 
 ```powershell
-pnpm test
+pnpm check
 pnpm run deploy
 ```
 
@@ -193,7 +193,7 @@ Workers Free 的 CPU 上限很低，自动化测试与本地模拟器不能证�
 
 ## 8. 后续更新与员工变动
 
-更新代码前做一次完整备份。在仓库执行 `git pull --ff-only`、`pnpm install --frozen-lockfile`、`pnpm test`、`pnpm db:production`、`pnpm run deploy`。`db:production` 只应用尚未执行的迁移，不会重建全部表。
+更新代码前做一次完整备份。在仓库执行 `git pull --ff-only`、`pnpm install --frozen-lockfile`、`pnpm check`、`pnpm db:production`、`pnpm run deploy`。`db:production` 只应用尚未执行的迁移，不会重建全部表。
 
 开通账户：由网站提供者把邮箱、name 和 role（店主）添加到 STAFF_ACCOUNTS Secret 的完整名单，并加入 Access Allow 策略；不要覆盖掉原有邮箱。账户可省略初始门店信息。门店店主再通过网站头像 → 账户管理 → 添加已有店主把该邮箱加入门店。姓名和头像只能本人修改。停用只撤销当前门店资格，不能自行恢复；主动退出则保留 30 天恢复资格，现有店主可取消这一资格。所有有效成员退出或被后台撤权后，门店保留 30 天再清理。删除唯一门店也不会删除账户。要撤销账户全部登录资格，请从 Secret 移除邮箱，再移除 Access 策略中的邮箱。已有 JWT 和遗留 managed 行不能绕过后台授权。迁移前在网页开通的合法账户需补入 Secret 才能继续登录。
 

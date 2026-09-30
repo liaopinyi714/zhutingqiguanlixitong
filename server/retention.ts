@@ -1,10 +1,9 @@
 import { readStaffAccounts, type AuthEnv } from './auth';
-
-export const RETENTION_DAYS = 30;
-const dayMs = 24 * 60 * 60 * 1000;
+import { DAY_MS, RETENTION_DAYS } from '../shared/calendar';
+export { RETENTION_DAYS } from '../shared/calendar';
 
 export function retentionCutoff(now = new Date()) {
-  return new Date(now.getTime() - RETENTION_DAYS * dayMs)
+  return new Date(now.getTime() - RETENTION_DAYS * DAY_MS)
     .toISOString()
     .slice(0, 19)
     .replace('T', ' ');

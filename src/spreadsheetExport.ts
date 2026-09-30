@@ -1,4 +1,4 @@
-import { pta } from '../server/domain';
+import { pta, editableFrequencies as frequencies } from '../shared/hearing';
 
 export type Cell = string | number | null;
 export type Sheet = {
@@ -17,7 +17,6 @@ export type Snapshot = {
   followups: any[];
 };
 
-const frequencies = [250, 500, 1000, 2000, 4000, 8000];
 const blank = (value: unknown): string => (value == null ? '' : String(value));
 const json = (value: string) => JSON.parse(value || '{}');
 function model(device: any): string {
