@@ -26,10 +26,12 @@ export function HearingEditor({
   value,
   onChange,
   previous,
+  loading = false,
 }: {
   value: HearingExam;
   onChange?: (next: HearingExam) => void;
   previous?: HearingExam;
+  loading?: boolean;
 }) {
   const [mode, setMode] = useState<'AC' | 'BC' | 'UCL'>('AC');
   const [erase, setErase] = useState(false);
@@ -100,7 +102,15 @@ export function HearingEditor({
       <section className="hearing-ear">
         <header>
           <h3 style={{ color }}>{left ? '左耳' : '右耳'}</h3>
-          <span>平均听阈 {pta(value[left ? 'left' : 'right']) ?? '—'} dB HL</span>
+          <span>
+            平均听阈{' '}
+            {loading ? (
+              <span className="skeleton-line skeleton-hearing-value" />
+            ) : (
+              (pta(value[left ? 'left' : 'right']) ?? '—')
+            )}{' '}
+            dB HL
+          </span>
         </header>
         <svg
           viewBox="0 0 420 428"
@@ -256,14 +266,18 @@ export function HearingEditor({
     <div className="hearing-editor">
       <label className="hearing-date">
         检查日期{' '}
-        <input
-          type="date"
-          required
-          value={value.date}
-          max={new Date().toLocaleDateString('sv-SE')}
-          disabled={!onChange}
-          onChange={(e) => onChange?.({ ...value, date: e.target.value })}
-        />
+        {loading ? (
+          <span className="skeleton-line skeleton-control" />
+        ) : (
+          <input
+            type="date"
+            required
+            value={value.date}
+            max={new Date().toLocaleDateString('sv-SE')}
+            disabled={!onChange}
+            onChange={(e) => onChange?.({ ...value, date: e.target.value })}
+          />
+        )}
       </label>
       <div className="hearing-workspace">
         {graph(false)}
@@ -273,7 +287,7 @@ export function HearingEditor({
             <button
               type="button"
               key={tool}
-              disabled={!onChange}
+              disabled={loading || !onChange}
               aria-pressed={mode === tool && !erase}
               className={mode === tool && !erase ? 'selected' : ''}
               onClick={() => {
@@ -285,10 +299,11 @@ export function HearingEditor({
               <small>{{ AC: '气导', BC: '骨导', UCL: '不舒适阈' }[tool]}</small>
             </button>
           ))}
-          {onChange && (
+          {(onChange || loading) && (
             <>
               <button
                 type="button"
+                disabled={loading}
                 className={erase ? 'selected' : ''}
                 aria-pressed={erase}
                 onClick={() => setErase(!erase)}
@@ -297,10 +312,10 @@ export function HearingEditor({
               </button>
               <button
                 type="button"
-                disabled={!undo.length}
+                disabled={loading || !undo.length}
                 onClick={() => {
                   const last = undo.at(-1)!;
-                  onChange({ ...value, [last.key]: last.points });
+                  onChange?.({ ...value, [last.key]: last.points });
                   setUndo(undo.slice(0, -1));
                   setMessage('已撤销上一个测点操作');
                 }}
@@ -310,7 +325,7 @@ export function HearingEditor({
               <label>
                 <input
                   type="checkbox"
-                  disabled={mode === 'UCL'}
+                  disabled={loading || mode === 'UCL'}
                   checked={mode !== 'UCL' && masked}
                   onChange={(e) => setMasked(e.target.checked)}
                 />
@@ -319,6 +334,7 @@ export function HearingEditor({
               <label>
                 <input
                   type="checkbox"
+                  disabled={loading}
                   checked={noResponse}
                   onChange={(e) => setNoResponse(e.target.checked)}
                 />
@@ -331,7 +347,7 @@ export function HearingEditor({
       </div>
       <p className="hearing-hint" role="status">
         {message ||
-          (onChange
+          (onChange || loading
             ? '选择 AC、BC 或 UCL，点击图上位置即可标记；同一频率再次点击可修改，按 5 dB 自动对齐。'
             : '○ / × 气导 · 〈 / 〉骨导 · U 不舒适阈 · 淡虚线为前次气导')}
       </p>

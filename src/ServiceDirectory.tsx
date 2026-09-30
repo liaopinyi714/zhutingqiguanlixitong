@@ -75,7 +75,11 @@ export function ServiceDirectory({
         <div>
           <h1>{repairView ? '设备维修' : warrantyView ? '保修提醒' : '验配设备'}</h1>
           <p>
-            {loading ? <span className="skeleton-line skeleton-table-main" /> : `${source.length} 条${repairView ? '维修记录' : '验配记录'}`}
+            {loading ? (
+              <span className="skeleton-line skeleton-table-main" />
+            ) : (
+              `${source.length} 条${repairView ? '维修记录' : '验配记录'}`
+            )}
           </p>
         </div>
         {canEdit && !warrantyView && (
@@ -155,99 +159,129 @@ export function ServiceDirectory({
           </label>
         </div>
         <div className="directory-list">
-          {loadError || (loading ? <div role="status" aria-label="正在读取记录">{Array.from({ length: 4 }, (_, index) => (
-            <article className="directory-row" key={index}>
-              <span className="resource-icon"><Icon size={21} /></span>
-              <div className="directory-primary skeleton-task-body"><span className="skeleton-line skeleton-task-name" /><span className="skeleton-line skeleton-task-description" /><span className="skeleton-line skeleton-task-date" /></div>
-              <div className="directory-status"><span className="skeleton-line skeleton-task-action" /></div>
-              <div className="directory-actions"><span className="skeleton-line skeleton-task-action" /></div>
-            </article>
-          ))}</div> : rows.map((row) => {
-            const device = row.device || row;
-            return (
-              <article className="directory-row" key={row.id}>
-                <span className="resource-icon">
-                  <Icon size={21} />
-                </span>
-                <div className="directory-primary">
-                  <button
-                    className="resource-title"
-                    onClick={() =>
-                      open(row.customer_id, repairView ? '维修记录' : '验配记录', row.id)
-                    }
-                  >
-                    {repairView ? row.problem || '维修详情' : deviceName(device)}
-                    <ArrowRight size={15} />
-                  </button>
-                  <div className="resource-meta">
-                    <button className="relation-link" onClick={() => open(row.customer_id)}>
-                      <Users size={14} />
-                      {row.name}
-                    </button>
-                    <span>{repairView ? row.occurred_date : row.date}</span>
-                    <span>{device.side}</span>
-                  </div>
-                  {repairView ? (
-                    <button
-                      className="relation-link device-relation"
-                      onClick={() => open(row.customer_id, '验配记录', row.fitting_id)}
-                    >
-                      <Headphones size={14} />
-                      {deviceName(device)}
-                    </button>
-                  ) : (
-                    <small className="serial-text">{deviceSerial(device)}</small>
-                  )}
-                </div>
-                <div className="directory-status">
-                  {repairView ? (
-                    <>
-                      <span
-                        className={
-                          'service-status ' + (row.status === '已完成' ? 'is-complete' : '')
+          {loadError ||
+            (loading ? (
+              <div role="status" aria-label="正在读取记录">
+                {Array.from({ length: 4 }, (_, index) => (
+                  <article className="directory-row" key={index}>
+                    <span className="resource-icon">
+                      <Icon size={21} />
+                    </span>
+                    <div className="directory-primary skeleton-task-body">
+                      <span className="skeleton-line skeleton-task-name" />
+                      <span className="skeleton-line skeleton-task-description" />
+                      <span className="skeleton-line skeleton-task-date" />
+                    </div>
+                    <div className="directory-status">
+                      <span className="skeleton-line skeleton-table-status" />
+                      <small>
+                        <span className="skeleton-line skeleton-task-date" />
+                      </small>
+                    </div>
+                    <div className="directory-actions">
+                      {!repairView && (
+                        <button className="button small" disabled>
+                          <Wrench size={14} />
+                          维修
+                        </button>
+                      )}
+                      <button className="icon-action" disabled aria-label="查看详情">
+                        <ArrowRight size={18} />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              rows.map((row) => {
+                const device = row.device || row;
+                return (
+                  <article className="directory-row" key={row.id}>
+                    <span className="resource-icon">
+                      <Icon size={21} />
+                    </span>
+                    <div className="directory-primary">
+                      <button
+                        className="resource-title"
+                        onClick={() =>
+                          open(row.customer_id, repairView ? '维修记录' : '验配记录', row.id)
                         }
                       >
-                        {row.status}
-                      </span>
-                      <small>¥ {new Intl.NumberFormat('zh-CN').format(row.price)}</small>
-                    </>
-                  ) : (
-                    <>
-                      <span
-                        className={
-                          'service-status ' +
-                          (device.warranty && warrantyDays(device.warranty) < 0 ? 'is-expired' : '')
+                        {repairView ? row.problem || '维修详情' : deviceName(device)}
+                        <ArrowRight size={15} />
+                      </button>
+                      <div className="resource-meta">
+                        <button className="relation-link" onClick={() => open(row.customer_id)}>
+                          <Users size={14} />
+                          {row.name}
+                        </button>
+                        <span>{repairView ? row.occurred_date : row.date}</span>
+                        <span>{device.side}</span>
+                      </div>
+                      {repairView ? (
+                        <button
+                          className="relation-link device-relation"
+                          onClick={() => open(row.customer_id, '验配记录', row.fitting_id)}
+                        >
+                          <Headphones size={14} />
+                          {deviceName(device)}
+                        </button>
+                      ) : (
+                        <small className="serial-text">{deviceSerial(device)}</small>
+                      )}
+                    </div>
+                    <div className="directory-status">
+                      {repairView ? (
+                        <>
+                          <span
+                            className={
+                              'service-status ' + (row.status === '已完成' ? 'is-complete' : '')
+                            }
+                          >
+                            {row.status}
+                          </span>
+                          <small>¥ {new Intl.NumberFormat('zh-CN').format(row.price)}</small>
+                        </>
+                      ) : (
+                        <>
+                          <span
+                            className={
+                              'service-status ' +
+                              (device.warranty && warrantyDays(device.warranty) < 0
+                                ? 'is-expired'
+                                : '')
+                            }
+                          >
+                            {warrantyLabel(device.warranty)}
+                          </span>
+                          <small>{device.warranty || '—'}</small>
+                        </>
+                      )}
+                    </div>
+                    <div className="directory-actions">
+                      {!repairView && (
+                        <button
+                          className="button small"
+                          onClick={() => open(row.customer_id, '维修记录', '', row.id)}
+                        >
+                          <Wrench size={14} />
+                          维修{row.repair_count > 0 ? ` · ${row.repair_count}` : ''}
+                        </button>
+                      )}
+                      <button
+                        className="icon-action"
+                        aria-label={'查看' + (repairView ? '维修' : '验配') + '详情'}
+                        onClick={() =>
+                          open(row.customer_id, repairView ? '维修记录' : '验配记录', row.id)
                         }
                       >
-                        {warrantyLabel(device.warranty)}
-                      </span>
-                      <small>{device.warranty || '—'}</small>
-                    </>
-                  )}
-                </div>
-                <div className="directory-actions">
-                  {!repairView && (
-                    <button
-                      className="button small"
-                      onClick={() => open(row.customer_id, '维修记录', '', row.id)}
-                    >
-                      <Wrench size={14} />
-                      维修{row.repair_count > 0 ? ` · ${row.repair_count}` : ''}
-                    </button>
-                  )}
-                  <button
-                    className="icon-action"
-                    aria-label={'查看' + (repairView ? '维修' : '验配') + '详情'}
-                    onClick={() =>
-                      open(row.customer_id, repairView ? '维修记录' : '验配记录', row.id)
-                    }
-                  >
-                    <ArrowRight size={18} />
-                  </button>
-                </div>
-              </article>
-            );
-          }))}
+                        <ArrowRight size={18} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })
+            ))}
           {!loading && !loadError && !rows.length && (
             <div className="empty">
               <Icon size={26} />
@@ -255,7 +289,9 @@ export function ServiceDirectory({
             </div>
           )}
         </div>
-        <div className="table-footer">{loading ? <span className="skeleton-line skeleton-task-date" /> : `共 ${rows.length} 条`}</div>
+        <div className="table-footer">
+          {loading ? <span className="skeleton-line skeleton-task-date" /> : `共 ${rows.length} 条`}
+        </div>
       </section>
     </>
   );

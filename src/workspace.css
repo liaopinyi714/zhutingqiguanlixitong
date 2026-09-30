@@ -1705,19 +1705,11 @@ textarea:focus-visible {
 .data-retry { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 82px; padding: 18px 22px; color: #626971; font-size: 14px; }
 .data-retry .button { flex-shrink: 0; }
 .data-load-alert { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 11px 15px; margin-bottom: 18px; border: 1px solid #e7e3da; border-radius: 8px; background: #fffcf7; color: #685f50; font-size: 14px; }
-.home-shortcuts .loading-rows { padding: 0; }
-.home-shortcuts .loading-row { min-height: 48px; }
-.home-shortcuts .skeleton-mark { width: 18px; height: 18px; background: #eef0f2; }
-.journey-panel .loading-rows { padding: 12px 0 0; }
 .cf-shell .skeleton-task-body { display: grid; gap: 9px; }
 .cf-shell .skeleton-task-name { width: 105px; height: 14px; }
 .cf-shell .skeleton-task-description { width: min(320px, 78%); height: 12px; }
 .cf-shell .skeleton-task-date { width: 86px; height: 11px; }
 .cf-shell .skeleton-task-action { width: 61px; height: 29px; }
-.cf-shell .journey-placeholder { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin-top: 16px; min-height: 35px; }
-.cf-shell .journey-placeholder > .skeleton-line:first-child { width: 78px; }
-.cf-shell .journey-placeholder .bar-track { flex-basis: 100%; margin-top: 0; }
-.cf-shell .journey-placeholder .bar-track .skeleton-line { width: 42%; height: 5px; }
 .cf-shell .customer-skeleton-row { cursor: default; }
 .cf-shell .customer-skeleton-row:hover { background: #fff; }
 .cf-shell .customer-skeleton-row .skeleton-person { display: grid; gap: 7px; }
@@ -1726,14 +1718,29 @@ textarea:focus-visible {
 .cf-shell .customer-skeleton-row .skeleton-table-main { width: 94px; }
 .cf-shell .customer-skeleton-row .skeleton-table-sub { width: 67px; height: 10px; margin-top: 7px; }
 .cf-shell .customer-skeleton-row .skeleton-table-status { width: 52px; height: 20px; border-radius: 11px; }
-.cf-shell .skeleton-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
-.cf-shell .skeleton-info-grid .loading-rows { padding: 0; }
-.cf-shell .skeleton-chart { height: min(380px, 52vw); border-radius: 8px; margin-top: 18px; }
-.cf-shell .customer-hero-skeleton .skeleton-customer-title { display: grid; gap: 11px; min-width: 0; }
-.cf-shell .customer-hero-skeleton .skeleton-customer-title .skeleton-line:first-child { width: 110px; height: 25px; }
-.cf-shell .customer-hero-skeleton .skeleton-customer-title .skeleton-line:nth-child(2) { width: min(260px, 45vw); }
-.cf-shell .customer-hero-skeleton .skeleton-customer-title .skeleton-line:last-child { width: 80px; height: 11px; }
-.cf-shell .customer-hero-skeleton .skeleton-hero-action { width: 100px; height: 35px; }
+.cf-shell .skeleton-person-name { width: 96px; height: 17px; }
+.cf-shell .skeleton-field-value { width: 110px; height: 24px; }
+.cf-shell .skeleton-record-description { width: min(220px, 100%); height: 18px; }
+.cf-shell .skeleton-record-title { width: min(240px, 100%); height: 24px; }
+.cf-shell .skeleton-customer-name { width: 110px; height: 32px; }
+.cf-shell .skeleton-customer-meta { width: min(300px, 48vw); height: 24px; }
+.cf-shell .skeleton-inline-count { display: inline-block; width: 18px; height: 16px; vertical-align: middle; }
+.cf-shell .customer-hero-skeleton .person small { display: flex; align-items: center; gap: 8px; }
+.cf-shell .skeleton-table-status { width: 60px; height: 20px; border-radius: 11px; }
+.cf-shell .skeleton-tab-count { display: inline-block; width: 12px; height: 12px; vertical-align: middle; }
+.cf-shell .skeleton-bar { width: 42%; height: 100%; border-radius: inherit; }
+.cf-shell .skeleton-distribution-count { width: 70px; height: 20px; }
+.cf-shell .skeleton-control { width: 155px; height: 38px; border: 1px solid var(--ui-border); }
+.cf-shell .skeleton-hearing-value { display: inline-block; width: 25px; height: 12px; vertical-align: middle; }
+.cf-shell .skeleton-task-type { display: inline-block; width: 62px; height: 16px; margin-left: 8px; }
+.cf-shell .task-body > .skeleton-task-name { display: inline-block; }
+.cf-shell .task-description > .skeleton-line { width: min(320px, 100%); }
+.cf-shell .task-actions button:disabled { opacity: 1; cursor: default; }
+.cf-shell .recent-customer-placeholder { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 58px; border: 0; border-bottom: 1px solid #ededed; background: #fff; text-align: left; padding: 10px 4px; color: #737980; font: inherit; }
+.cf-shell .recent-customer-placeholder small { margin-left: auto; }
+.cf-shell .skeleton-audiogram { aspect-ratio: 550 / 570; border-radius: 8px; margin-top: 0; }
+.cf-shell .chart-summary > span:first-child { display: inline-flex; align-items: center; gap: 8px; }
+.cf-shell .customer-hero-skeleton .button-row button:disabled { opacity: 1; }
 .cf-shell .stat:not(:disabled) .stat-value,
 .cf-shell .home-shortcuts section:last-child > button,
 .cf-shell .task-record,

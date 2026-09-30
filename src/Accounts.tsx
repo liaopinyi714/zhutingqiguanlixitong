@@ -39,13 +39,43 @@ function AccountRowsSkeleton({ kind, count = 2 }: { kind: 'store' | 'account'; c
   return (
     <div role="status" aria-label={kind === 'store' ? '正在读取门店' : '正在读取账户'}>
       {Array.from({ length: count }, (_, index) => (
-        <div className={kind === 'store' ? 'account-store-row' : 'account-row'} key={index}>
-          <span className="skeleton-mark account-skeleton-icon" />
-          <div className="account-skeleton-copy">
-            <span className="skeleton-line account-skeleton-title" />
-            <span className="skeleton-line account-skeleton-subtitle" />
+        <div className={kind === 'store' ? '' : 'account-row-wrap'} key={index}>
+          <div className={kind === 'store' ? 'account-store-row' : 'account-row'}>
+            {kind === 'store' ? (
+              <span className="account-store-icon">
+                <Building2 size={18} strokeWidth={1.6} />
+              </span>
+            ) : (
+              <span className="account-avatar skeleton-mark" />
+            )}
+            <div className={kind === 'store' ? 'account-skeleton-copy' : 'account-identity'}>
+              <strong>
+                <span className="skeleton-line account-skeleton-title" />
+              </strong>
+              <span className="skeleton-line account-skeleton-subtitle" />
+            </div>
+            {kind === 'store' ? (
+              <>
+                <button className="icon-button" disabled aria-label="修改门店名称">
+                  <Pencil size={16} />
+                </button>
+                <button className="button small" disabled>
+                  <LogOut size={15} />
+                  退出
+                </button>
+                <button className="icon-button" disabled aria-label="删除门店">
+                  <Trash2 size={16} />
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="skeleton-line account-skeleton-action" />
+                <button className="icon-button" disabled aria-label="账户操作">
+                  <Pencil size={16} />
+                </button>
+              </>
+            )}
           </div>
-          <span className="skeleton-line account-skeleton-action" />
         </div>
       ))}
     </div>

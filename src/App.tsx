@@ -42,6 +42,7 @@ import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
 import { api } from './api';
+import { CustomerDetailSkeleton, CustomerPageSkeleton, JourneySkeleton, RecentCustomersSkeleton, RemovedCustomersSkeleton, TaskListSkeleton } from './WorkspaceSkeletons';
 
 import type { Customer, Exam, Follow, Detail, Point } from './types';
 const blankCurve = () =>
@@ -119,56 +120,6 @@ function LoadingRows({ lines = 3, label = '正在读取数据' }: { lines?: numb
       ))}
     </div>
   );
-}
-function TaskListSkeleton({ lines = 4 }: { lines?: number }) {
-  return <div className="task-list" role="status" aria-label="正在读取随访任务">
-    {Array.from({ length: lines }, (_, index) => <div className="task-row" key={index}>
-      <span className="skeleton-mark task-icon" />
-      <div className="task-body skeleton-task-body">
-        <span className="skeleton-line skeleton-task-name" />
-        <span className="skeleton-line skeleton-task-description" />
-        <span className="skeleton-line skeleton-task-date" />
-      </div>
-      <span className="skeleton-line skeleton-task-action" />
-    </div>)}
-  </div>;
-}
-function JourneySkeleton() {
-  return <div className="journey-bars" role="status" aria-label="正在读取服务阶段">
-    {Array.from({ length: 4 }, (_, index) => <div className="journey-placeholder" key={index}>
-      <span className="skeleton-line" /><span className="skeleton-line skeleton-count" />
-      <div className="bar-track"><span className="skeleton-line" /></div>
-    </div>)}
-  </div>;
-}
-function CustomerDetailSkeleton({ tab }: { tab: string }) {
-  if (tab === '概览') return <div className="detail-grid" role="status" aria-label="正在读取客户档案">
-    <div>
-      <section className="panel padded"><div className="section-title"><h2>基本资料</h2><FileText size={18} /></div><div className="skeleton-info-grid"><LoadingRows lines={5} /><LoadingRows lines={5} /></div></section>
-      <section className="panel padded space-top"><div className="section-title"><h2>最近听力检查</h2></div><div className="skeleton-chart skeleton-surface" /></section>
-    </div>
-    <div>
-      <section className="panel padded"><div className="section-title"><h2>验配设备</h2><Headphones size={18} /></div><LoadingRows lines={2} /></section>
-      <section className="panel padded space-top"><div className="section-title"><h2>随访记录</h2><CalendarDays size={18} /></div><LoadingRows lines={2} /></section>
-    </div>
-  </div>;
-  if (tab === '听力检查') return <section className="panel padded" role="status" aria-label="正在读取听力检查">
-    <div className="section-title"><h2>听力检查</h2></div><div className="skeleton-chart skeleton-surface" />
-  </section>;
-  return <section className="panel padded" role="status" aria-label={`正在读取${tab}`}>
-    <div className="section-title"><h2>{tab}</h2></div><LoadingRows lines={3} />
-  </section>;
-}
-function CustomerPageSkeleton({ tab }: { tab: string }) {
-  return <>
-    <span className="back"><ArrowLeft size={16} />返回客户档案</span>
-    <section className="customer-hero customer-hero-skeleton" role="status" aria-label="正在读取客户">
-      <div className="person"><span className="skeleton-mark avatar large-avatar" /><div className="skeleton-customer-title"><span className="skeleton-line" /><span className="skeleton-line" /><span className="skeleton-line" /></div></div>
-      <span className="skeleton-line skeleton-hero-action" />
-    </section>
-    <div className="detail-tabs" aria-hidden="true">{customerTabs.map((item) => <button key={item} type="button" disabled className={tab === item ? 'active' : ''}>{item}</button>)}</div>
-    <CustomerDetailSkeleton tab={tab} />
-  </>;
 }
 function Audiogram({ exam, previous }: { exam: Exam; previous?: Exam }) {
   const width = 550,
@@ -917,7 +868,7 @@ export default function App() {
       loadDataset(key, session),
     );
   }
-  function dataFallback(keys: Dataset[], lines = 3) {
+  function dataFallback(keys: Dataset[], lines = 3, placeholder?: ReactNode) {
     const failed = keys.filter((key) => dataState[key] === 'error');
     if (failed.length)
       return (
@@ -928,7 +879,7 @@ export default function App() {
           </button>
         </div>
       );
-    return <LoadingRows lines={lines} />;
+    return placeholder ?? <LoadingRows lines={lines} />;
   }
   const dataReady = (...keys: Dataset[]) => keys.every((key) => dataState[key] === 'ready');
   async function loadDetail(key: string) {
@@ -1635,7 +1586,7 @@ export default function App() {
               <td><span className="skeleton-line skeleton-table-status" /></td>
               <td><span className="skeleton-line skeleton-table-main" /></td>
               {!compact && <td><span className="skeleton-line skeleton-table-main" /></td>}
-              <td />
+              <td><ChevronRight size={16} /></td>
             </tr>
           )) : list.map((c) => (
             <tr
@@ -2073,7 +2024,7 @@ export default function App() {
                   <p className="muted retention-note">
                     删除后保留 30 天；到期自动彻底清除，之后无法恢复。
                   </p>
-                  {!dataReady('removed') ? dataFallback(['removed']) : removedCustomers.length ? (
+                  {!dataReady('removed') ? dataFallback(['removed'], 3, <RemovedCustomersSkeleton />) : removedCustomers.length ? (
                     <div className="removed-customer-list">
                       {removedCustomers.map((item) => (
                         <div key={item.id}>
@@ -2123,7 +2074,7 @@ export default function App() {
               onDirty={(value) => {
                 intakeDirty.current = value;
               }}
-              role={role}
+              role={boot ? '店主' : role}
               onSave={saveIntake}
               onCancel={() => navigate('customers')}
             />
@@ -2140,7 +2091,7 @@ export default function App() {
                       day: 'numeric',
                       weekday: 'long',
                     })}{' '}
-                    <span className="dot-sep">·</span> {dataReady('followups') ? `今日有 ${todayTasks.length} 项服务待跟进` : '正在读取今日待办'}
+                    <span className="dot-sep">·</span> 今日有 {dataReady('followups') ? todayTasks.length : <span className="skeleton-line skeleton-inline-count" />} 项服务待跟进
                   </p>
                 </div>
               </div>
@@ -2182,7 +2133,7 @@ export default function App() {
                       <small>{recent.status}</small>
                       <ChevronRight size={16} />
                     </button>
-                  )) : dataFallback(['customers'], 2)}
+                  )) : dataFallback(['customers'], 3, <RecentCustomersSkeleton />)}
                 </section>
               </div>
               <div className="home-section-label">
@@ -2350,14 +2301,14 @@ export default function App() {
                   </label>
                 </div>
                 {dataReady('customers') ? customerTable(filtered) : dataState.customers === 'error' ? dataFallback(['customers']) : customerTable([], false, true)}
-                {dataReady('customers') && <div className="table-footer">
-                  共 {filtered.length} 位客户 <span>点击客户查看完整服务档案</span>
-                </div>}
+                <div className="table-footer">
+                  {dataReady('customers') ? `共 ${filtered.length} 位客户` : <span className="skeleton-line skeleton-task-date" />} <span>点击客户查看完整服务档案</span>
+                </div>
               </section>
             </>
           )}
           {page === 'customers' && selected && !customer && (
-            dataReady('customers') ? <><div className="page-heading"><h1>客户档案</h1></div><section className="panel"><Empty text="没有找到这位客户" action={<button className="button" onClick={() => navigate('customers')}>返回客户列表</button>} /></section></> : dataState.customers === 'error' ? dataFallback(['customers']) : <CustomerPageSkeleton tab={tab} />
+            dataReady('customers') ? <><div className="page-heading"><h1>客户档案</h1></div><section className="panel"><Empty text="没有找到这位客户" action={<button className="button" onClick={() => navigate('customers')}>返回客户列表</button>} /></section></> : dataState.customers === 'error' ? dataFallback(['customers']) : <CustomerPageSkeleton tab={tab} returnLabel={navs.find((n) => n[0] === originPage)?.[1]} />
           )}
           {page === 'customers' && customer && (
             <>
@@ -2422,9 +2373,9 @@ export default function App() {
                     }}
                   >
                     {t}
-                    {detail && t !== '概览' && (
+                    {t !== '概览' && (
                       <span>
-                        {
+                        {detail ?
                           (
                             {
                               听力检查: detail.exams.length,
@@ -2433,7 +2384,7 @@ export default function App() {
                               随访记录: detail.followups.length,
                               报告附件: detail.attachments.length,
                             } as Record<string, number>
-                          )[t]
+                          )[t] : <span className="skeleton-line skeleton-tab-count" />
                         }
                       </span>
                     )}
@@ -3327,17 +3278,21 @@ export default function App() {
                 <ArrowRight size={17} />
               </button>
               <div className="report-grid">
-                {dataReady('customers') ? <Distribution
+                {<Distribution
                   title="客户来源"
                   subtitle=""
+                  loading={!dataReady('customers')}
+                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
                   data={[...new Set(customers.map((c) => c.source))].map((s) => ({
                     label: s || '未填写',
                     count: customers.filter((c) => c.source === s).length,
                   }))}
-                /> : <section className="panel">{dataFallback(['customers'], 4)}</section>}
-                {dataReady('customers') ? <Distribution
+                />}
+                {<Distribution
                   title="客户年龄分布"
                   subtitle="按当前日期与出生日期计算"
+                  loading={!dataReady('customers')}
+                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
                   data={[
                     {
                       label: '40 岁以下',
@@ -3364,23 +3319,27 @@ export default function App() {
                       count: customers.filter((c) => !Number.isFinite(age(c.birthDate))).length,
                     },
                   ]}
-                /> : <section className="panel">{dataFallback(['customers'], 4)}</section>}
-                {dataReady('customers') ? <Distribution
+                />}
+                {<Distribution
                   title="服务阶段"
                   subtitle="每位客户只计入当前阶段"
+                  loading={!dataReady('customers')}
+                  loadError={dataState.customers === 'error' ? dataFallback(['customers']) : undefined}
                   data={statuses.slice(1).map((s) => ({
                     label: s,
                     count: customers.filter((c) => c.status === s).length,
                   }))}
-                /> : <section className="panel">{dataFallback(['customers'], 4)}</section>}
-                {dataReady('followups') ? <Distribution
+                />}
+                {<Distribution
                   title="随访服务类型"
                   subtitle="包含待完成与已完成任务"
+                  loading={!dataReady('followups')}
+                  loadError={dataState.followups === 'error' ? dataFallback(['followups']) : undefined}
                   data={['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((s) => ({
                     label: s,
                     count: followups.filter((f) => f.type === s).length,
                   }))}
-                /> : <section className="panel">{dataFallback(['followups'], 4)}</section>}
+                />}
               </div>
             </>
           )}
@@ -3609,31 +3568,35 @@ function Distribution({
   title,
   subtitle,
   data,
+  loading = false,
+  loadError,
 }: {
   title: string;
   subtitle: string;
   data: { label: string; count: number }[];
+  loading?: boolean;
+  loadError?: ReactNode;
 }) {
   const total = data.reduce((n, d) => n + d.count, 0);
   return (
     <section className="panel padded">
       <h2>{title}</h2>
       {subtitle && <p className="muted">{subtitle}</p>}
-      <div className="distribution">
-        {data.map((d) => (
-          <div key={d.label}>
+      {loadError || <div className="distribution" aria-busy={loading}>
+        {(loading && !data.length ? Array.from({ length: 4 }, (_, i) => ({ label: '', count: 0, key: i })) : data).map((d, i) => (
+          <div key={d.label || i}>
             <div>
-              <span>{d.label}</span>
+              <span>{d.label || (loading ? <span className="skeleton-line skeleton-task-name" /> : '')}</span>
               <strong>
-                {d.count} <small>({total ? Math.round((d.count / total) * 100) : 0}%)</small>
+                {loading ? <span className="skeleton-line skeleton-distribution-count" /> : <>{d.count} <small>({total ? Math.round((d.count / total) * 100) : 0}%)</small></>}
               </strong>
             </div>
             <div className="bar-track">
-              <i style={{ width: total ? (d.count / total) * 100 + '%' : '0%' }} />
+              {loading ? <span className="skeleton-line skeleton-bar" /> : <i style={{ width: total ? (d.count / total) * 100 + '%' : '0%' }} />}
             </div>
           </div>
         ))}
-      </div>
+      </div>}
     </section>
   );
 }
