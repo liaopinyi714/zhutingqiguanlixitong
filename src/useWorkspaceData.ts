@@ -15,9 +15,6 @@ export type Summary = {
   devices: number;
   repairs: number;
   warrantyAlerts: number;
-  sources?: Record<string, number>;
-  ages?: Record<string, number>;
-  types?: Record<string, number>;
 };
 const empty: Summary = {
   date: '',

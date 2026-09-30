@@ -317,10 +317,8 @@ tr:focus-visible {
 }
 .cf-shell .timeline strong,
 .cf-shell .attachment strong,
-.cf-shell .distribution > div > div:first-child,
 .cf-shell .permissions,
 .cf-shell .paragraph,
-.cf-shell .report-grid p,
 .cf-shell .notice p,
 .cf-shell .empty p {
   font-size: 14px;
@@ -341,7 +339,6 @@ tr:focus-visible {
   color: #858585;
 }
 .cf-shell .timeline p,
-.cf-shell .distribution small,
 .cf-shell .exam-readings small,
 .cf-shell .exam-readings p,
 .cf-shell .exam-layout > div > small {
@@ -349,8 +346,7 @@ tr:focus-visible {
   color: var(--ui-muted);
 }
 .cf-shell .permissions td,
-.cf-shell .permissions th,
-.cf-shell .distribution strong {
+.cf-shell .permissions th {
   color: var(--ui-text);
 }
 .cf-shell .exam-toolbar select,

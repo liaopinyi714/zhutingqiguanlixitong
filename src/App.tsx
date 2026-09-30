@@ -33,7 +33,7 @@ import {
 } from 'lucide-react';
 import { blankCurve } from '../shared/hearing';
 import { today, age, money, localTime, restoreDeadline } from './format';
-import { statuses, Badge, Empty, LoadingRows, Stat, Distribution } from './ui';
+import { statuses, Badge, Empty, LoadingRows, Stat } from './ui';
 import { Audiogram } from './Audiogram';
 import { IntakePage } from './IntakePage';
 import { HearingEditor } from './HearingEditor';
@@ -2858,55 +2858,7 @@ export default function App() {
                 )}
                 <ArrowRight size={17} />
               </button>
-              <div className="report-grid">
-                {
-                  <Distribution
-                    title="客户来源"
-                    subtitle=""
-                    loading={!dataReady('stats')}
-                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
-                    data={Object.entries(stats.sources || {}).map(([label, count]) => ({
-                      label,
-                      count,
-                    }))}
-                  />
-                }
-                {
-                  <Distribution
-                    title="客户年龄分布"
-                    subtitle="按当前日期与出生日期计算"
-                    loading={!dataReady('stats')}
-                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
-                    data={['40 岁以下', '40–59 岁', '60–79 岁', '80 岁及以上', '未填写'].map(
-                      (label) => ({ label, count: stats.ages?.[label] || 0 }),
-                    )}
-                  />
-                }
-                {
-                  <Distribution
-                    title="服务阶段"
-                    subtitle="每位客户只计入当前阶段"
-                    loading={!dataReady('stats')}
-                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
-                    data={statuses.slice(1).map((s) => ({
-                      label: s,
-                      count: stats.status[s] || 0,
-                    }))}
-                  />
-                }
-                {
-                  <Distribution
-                    title="随访服务类型"
-                    subtitle="包含待完成与已完成任务"
-                    loading={!dataReady('stats')}
-                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
-                    data={['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((s) => ({
-                      label: s,
-                      count: stats.types?.[s] || 0,
-                    }))}
-                  />
-                }
-              </div>
+              {dataState.stats === 'error' && dataFallback(['stats'])}
             </>
           )}
           {page === 'settings' && (

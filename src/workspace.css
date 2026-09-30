@@ -1729,7 +1729,6 @@ textarea:focus-visible {
 .cf-shell .skeleton-table-status { width: 60px; height: 20px; border-radius: 11px; }
 .cf-shell .skeleton-tab-count { display: inline-block; width: 12px; height: 12px; vertical-align: middle; }
 .cf-shell .skeleton-bar { width: 42%; height: 100%; border-radius: inherit; }
-.cf-shell .skeleton-distribution-count { width: 70px; height: 20px; }
 .cf-shell .skeleton-control { width: 155px; height: 38px; border: 1px solid var(--ui-border); }
 .cf-shell .skeleton-hearing-value { display: inline-block; width: 25px; height: 12px; vertical-align: middle; }
 .cf-shell .skeleton-task-type { display: inline-block; width: 62px; height: 16px; margin-left: 8px; }
@@ -1745,8 +1744,7 @@ textarea:focus-visible {
 .cf-shell .home-shortcuts section:last-child > button,
 .cf-shell .task-record,
 .cf-shell .journey-bars,
-.cf-shell .customer-table,
-.cf-shell .report-grid .distribution { animation: data-reveal 220ms ease-out both; }
+.cf-shell .customer-table { animation: data-reveal 220ms ease-out both; }
 @keyframes data-reveal { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .cf-shell.booting button { pointer-events: none; }
 .cf-shell .sidebar .boot-store-name { width: 86px; height: 11px; margin-top: 7px; }
@@ -1764,8 +1762,7 @@ textarea:focus-visible {
   .cf-shell .home-shortcuts section:last-child > button,
   .cf-shell .task-record,
   .cf-shell .journey-bars,
-  .cf-shell .customer-table,
-  .cf-shell .report-grid .distribution { animation: none; }
+  .cf-shell .customer-table { animation: none; }
 }
 @media (max-width: 700px) {
   .cf-shell .account-skeleton-subtitle { width: 130px; }

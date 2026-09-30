@@ -33,7 +33,7 @@ describe('按页面读取计划', () => {
     expect(profile.customers).toBeNull();
     expect(profile.profile).toBe('/customers/' + encodeURIComponent('c/深页'));
     const report = paths({ page: 'reports' });
-    expect(report.summary).toBe('/summary?detail=1');
+    expect(report.summary).toBe('/summary?detail=0');
     expect(
       Object.entries(report)
         .filter(([, v]) => v)

@@ -16,7 +16,7 @@ export function workspaceReadPaths(input: ReadPlanInput) {
   return {
     summary:
       active && !['accounts', 'settings', 'intake', 'recycle'].includes(page)
-        ? '/summary?detail=' + (page === 'reports' ? '1' : '0')
+        ? '/summary?detail=0'
         : null,
     recent: active && (page === 'overview' || searchOpen) ? '/customers?paged=1&limit=6' : null,
     customers:

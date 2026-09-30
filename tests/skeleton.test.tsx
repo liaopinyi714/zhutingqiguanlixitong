@@ -28,9 +28,15 @@ describe('页面骨架对应实际页面', () => {
     const html = renderToStaticMarkup(<App />);
     expect([...html.matchAll(/<h1>([^<]+)<\/h1>/g)].map((match) => match[1])).toContain(title);
     expect(html).not.toContain('boot-demo-pill');
-    if (page === 'reports')
-      for (const heading of ['客户来源', '客户年龄分布', '服务阶段', '随访服务类型'])
+    if (page === 'reports') {
+      for (const heading of ['核心信息表格', '业务数据表格'])
         expect(html).toContain(`<h2>${heading}</h2>`);
+      for (const heading of ['客户来源', '客户年龄分布', '服务阶段', '随访服务类型'])
+        expect(html).not.toContain(`<h2>${heading}</h2>`);
+      expect(html).not.toContain('report-grid');
+      for (const label of ['客户总数', '已验配占比', '随访完成率', '保修需关注'])
+        expect(html).toContain(label);
+    }
     if (page === 'intake')
       for (const heading of ['听力检查与听力图', '验配信息'])
         expect(html).toContain(`<h2>${heading}</h2>`);
