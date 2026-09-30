@@ -7,17 +7,8 @@
     "storeName": "我的助听器门店"
   },
   {
-    "email": "fitter@example.com",
-    "name": "验配师",
-    "role": "验配师",
-    "tenantId": "store-001",
-    "storeName": "我的助听器门店"
-  },
-  {
-    "email": "reception@example.com",
-    "name": "前台",
-    "role": "前台",
-    "tenantId": "store-001",
-    "storeName": "我的助听器门店"
+    "email": "colleague@example.com",
+    "name": "另一位店主",
+    "role": "店主"
   }
 ]

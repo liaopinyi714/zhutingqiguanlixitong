@@ -1,3 +1,5 @@
+import { readStaffAccounts, type AuthEnv } from './auth';
+
 export const RETENTION_DAYS = 30;
 const dayMs = 24 * 60 * 60 * 1000;
 
@@ -9,11 +11,38 @@ export function retentionCutoff(now = new Date()) {
 }
 
 export async function purgeExpiredRecords(
-  env: { DB: D1Database; FILES: R2Bucket },
+  env: AuthEnv & { DB: D1Database; FILES: R2Bucket },
   now = new Date(),
 ) {
   const cutoff = retentionCutoff(now);
-  const expiredStore = 'tenant_id IN (SELECT id FROM stores WHERE deleted_at IS NOT NULL AND deleted_at<=?)';
+  // Removing an identity from the operator's allowlist also stops it from
+  // keeping a store alive. Missing/invalid production configuration must never
+  // be interpreted as an empty allowlist and trigger data deletion.
+  if (env.STAFF_ACCOUNTS) {
+    const provided = readStaffAccounts(env.STAFF_ACCOUNTS).filter((a) => a.role === '店主');
+    const validMembers = `SELECT 1 FROM store_memberships m,json_each(?) p
+      WHERE m.tenant_id=stores.id AND m.enabled=1 AND m.email=json_extract(p.value,'$.email')`;
+    await env.DB.prepare(
+      `UPDATE stores SET abandoned_at=COALESCE(abandoned_at,?)
+      WHERE deleted_at IS NULL AND NOT EXISTS(${validMembers})`,
+    )
+      .bind(now.toISOString().slice(0, 19).replace('T', ' '), JSON.stringify(provided))
+      .run();
+    await env.DB.prepare(
+      `UPDATE stores SET abandoned_at=NULL
+      WHERE deleted_at IS NULL AND abandoned_at>? AND EXISTS(${validMembers})`,
+    )
+      .bind(cutoff, JSON.stringify(provided))
+      .run();
+  }
+  await env.DB.prepare(
+    `UPDATE stores SET deleted_at=abandoned_at
+    WHERE deleted_at IS NULL AND abandoned_at IS NOT NULL AND abandoned_at<=?`,
+  )
+    .bind(cutoff)
+    .run();
+  const expiredStore =
+    'tenant_id IN (SELECT id FROM stores WHERE deleted_at IS NOT NULL AND deleted_at<=?)';
   let filesPurged = 0;
   // Batch R2 and D1 operations, and bound each run for the Workers free tier.
   for (let batch = 0; batch < 10; batch++) {
@@ -66,16 +95,24 @@ export async function purgeExpiredRecords(
     `DELETE FROM audit WHERE ${expiredStore}
      AND NOT EXISTS (SELECT 1 FROM customers WHERE customers.tenant_id=audit.tenant_id)
      AND NOT EXISTS (SELECT 1 FROM attachments WHERE attachments.tenant_id=audit.tenant_id)`,
-  ).bind(cutoff).run();
-  await env.DB.prepare(`DELETE FROM store_memberships WHERE ${expiredStore}`)
-    .bind(cutoff).run();
+  )
+    .bind(cutoff)
+    .run();
+  await env.DB.prepare(`DELETE FROM store_memberships WHERE ${expiredStore}`).bind(cutoff).run();
+  // Independent account profiles survive store deletion. Keep the small
+  // disabled membership tombstone to prevent initial configuration re-adding
+  // people after their voluntary recovery period expires.
   await env.DB.prepare(
-    `DELETE FROM accounts WHERE source='managed' AND ${expiredStore}
-     AND NOT EXISTS (SELECT 1 FROM store_memberships WHERE store_memberships.email=accounts.email)`,
-  ).bind(cutoff).run();
+    "UPDATE store_memberships SET avatar='',name='',last_seen_at=NULL WHERE enabled=0 AND left_at<=?",
+  )
+    .bind(cutoff)
+    .run();
   // Keep a tiny store tombstone so bootstrap configuration cannot recreate deleted stores.
-  await env.DB.prepare(`UPDATE stores SET name='已删除门店' WHERE deleted_at IS NOT NULL AND deleted_at<=?`)
-    .bind(cutoff).run();
+  await env.DB.prepare(
+    `UPDATE stores SET name='已删除门店' WHERE deleted_at IS NOT NULL AND deleted_at<=?`,
+  )
+    .bind(cutoff)
+    .run();
   await env.DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(now.getTime()).run();
   return { filesPurged, cutoff };
 }

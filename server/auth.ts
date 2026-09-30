@@ -30,21 +30,27 @@ export function isLocalDemo(env: AuthEnv, url: string) {
 }
 const staffSchema = z
   .array(
-    z.object({
-      email: z
-        .string()
-        .trim()
-        .email()
-        .transform((s) => s.toLowerCase()),
-      name: z.string().trim().min(1).max(60),
-      // Accept legacy configuration syntax without granting legacy roles access.
-      role: z.enum(['店主', '验配师', '前台']),
-      tenantId: z
-        .string()
-        .regex(/^[a-zA-Z0-9_-]{1,64}$/)
-        .refine((s) => s !== 'demo-store'),
-      storeName: z.string().trim().min(1).max(80),
-    }),
+    z
+      .object({
+        email: z
+          .string()
+          .trim()
+          .email()
+          .transform((s) => s.toLowerCase()),
+        name: z.string().trim().min(1).max(60),
+        // Accept legacy configuration syntax without granting legacy roles access.
+        role: z.enum(['店主', '验配师', '前台']),
+        tenantId: z
+          .string()
+          .regex(/^[a-zA-Z0-9_-]{1,64}$/)
+          .refine((s) => s !== 'demo-store')
+          .optional(),
+        storeName: z.string().trim().min(1).max(80).optional(),
+      })
+      .superRefine((row, ctx) => {
+        if (!!row.tenantId !== !!row.storeName)
+          ctx.addIssue({ code: 'custom', message: '初始门店 ID 和名称需要同时填写或同时省略' });
+      }),
   )
   .min(1)
   .max(50)
@@ -54,11 +60,11 @@ const staffSchema = z
     for (const row of rows) {
       if (
         emails.has(row.email) ||
-        (stores.has(row.tenantId) && stores.get(row.tenantId) !== row.storeName)
+        (row.tenantId && stores.has(row.tenantId) && stores.get(row.tenantId) !== row.storeName)
       )
         ctx.addIssue({ code: 'custom', message: '员工邮箱不能重复，同一门店名称必须一致' });
       emails.add(row.email);
-      stores.set(row.tenantId, row.storeName);
+      if (row.tenantId && row.storeName) stores.set(row.tenantId, row.storeName);
     }
   });
 let lastStaffConfig: string | undefined;
@@ -120,10 +126,10 @@ export async function accessSession(
     throw new AuthError('该员工尚未获得门店访问权限，请联系管理员', 403);
   return {
     role: account.role,
-    tenant_id: account.tenantId,
+    tenant_id: account.tenantId || '',
     email,
     name: account.name,
-    storeName: account.storeName,
+    storeName: account.storeName || '',
     actor: `${account.name} <${email}>`,
   };
 }

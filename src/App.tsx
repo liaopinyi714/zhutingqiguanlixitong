@@ -5,6 +5,7 @@ import {
   ChartNoAxesCombined,
   Wrench,
   Menu,
+  LogOut,
   Shield,
   ArrowDownToLine,
   ArrowLeft,
@@ -975,7 +976,7 @@ export default function App() {
         const r = identityResult.value;
         setIdentity(r);
         setRole(r.role);
-        loadInitialData();
+        if (r.tenant_id) loadInitialData();
       } else if (!demo) {
         setError((identityResult.reason as Error).message);
       }
@@ -1133,13 +1134,28 @@ export default function App() {
     if (!canLeaveEditor() || storeId === identity.tenant_id) return;
     setError('');
     try {
-      await api('/accounts/stores/' + encodeURIComponent(storeId) + '/switch', 'POST');
+      if (storeId) await api('/accounts/stores/' + encodeURIComponent(storeId) + '/switch', 'POST');
       accountDirty.current = false;
-      window.history.replaceState(null, '', '/#page=overview');
+      window.history.replaceState(null, '', storeId ? '/#page=overview' : '/#page=accounts');
       window.location.reload();
     } catch (reason) {
       setError((reason as Error).message);
     }
+  }
+  async function logoutAccount() {
+    if (!canLeaveEditor()) return;
+    setAccountAnchor(null);
+    try {
+      const result = await api('/logout', 'POST');
+      if (result.logoutUrl) window.location.assign(result.logoutUrl);
+      else {
+        dataSession.current += 1;
+        setCustomers([]); setFollowups([]); setDevices([]); setRepairs([]);
+        setRemovedCustomers([]); setDetail(null); setDataState(initialDataState);
+        setRole(''); setSelected(null); setEditorKind(''); setEditingField('');
+        accountDirty.current = false;
+      }
+    } catch (reason) { setError((reason as Error).message); }
   }
   function openCustomer(key: string, nextTab = '概览', record = '', device = '') {
     if (!canLeaveEditor()) return;
@@ -1549,9 +1565,10 @@ export default function App() {
                 setError('');
                 try {
                   await api('/login', 'POST', { role: '店主' });
-                  setIdentity(await api('/me'));
+                  const me = await api('/me');
+                  setIdentity(me);
                   setRole('店主');
-                  loadInitialData();
+                  if (me.tenant_id) loadInitialData();
                 } catch (e) {
                   setError((e as Error).message);
                 } finally {
@@ -1574,6 +1591,22 @@ export default function App() {
         <footer className="cf-login-footer">聆讯 · 助听器客户管理</footer>
       </div>
     );
+  if (role && !boot && !identity.tenant_id) return (
+    <div className="account-only-shell cf-shell">
+      <header className="topbar">
+        <div className="brand"><span className="brand-icon"><Ear size={23} /></span><b>聆讯</b></div>
+        <div className="top-actions"><AccountAvatar avatar={identity.avatar} name={identity.name} />
+          <button className="button small" onClick={() => void logoutAccount()}><LogOut size={16} />退出登录</button>
+        </div>
+      </header>
+      <main className="account-only-content">
+        {error && <div className="error" role="alert">{error}</div>}
+        <Accounts api={api} identity={identity} updated={async () => setIdentity(await api('/me'))}
+          switchStore={switchStore} dirty={(value) => { accountDirty.current = value; }}
+          saving={(value) => { accountBusy.current = value; }} />
+      </main>
+    </div>
+  );
   const navs = [
     ['overview', '工作台', House],
     ['customers', '客户档案', ContactRound],
@@ -3436,31 +3469,7 @@ export default function App() {
           switchStore={switchStore}
           close={() => setAccountAnchor(null)}
           manage={() => navigate('accounts')}
-          logout={async () => {
-            if (!canLeaveEditor()) return;
-            setAccountAnchor(null);
-            try {
-              const result = await api('/logout', 'POST');
-              if (result.logoutUrl) window.location.assign(result.logoutUrl);
-              else {
-                dataSession.current += 1;
-                setCustomers([]);
-                setFollowups([]);
-                setDevices([]);
-                setRepairs([]);
-                setRemovedCustomers([]);
-                setDetail(null);
-                setDataState(initialDataState);
-                setRole('');
-                setSelected(null);
-                setEditorKind('');
-                setEditingField('');
-                accountDirty.current = false;
-              }
-            } catch (reason) {
-              setError((reason as Error).message);
-            }
-          }}
+          logout={logoutAccount}
         />
       )}
       {toast && (

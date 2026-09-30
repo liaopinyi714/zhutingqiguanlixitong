@@ -87,6 +87,13 @@ app.use('/api/*', async (c, next) =>
     onError: (ctx) => ctx.json({ error: '提交内容过大，请缩小文件或减少文本' }, 413),
   })(c, next),
 );
+app.use('/api/*', async (c, next) => {
+  const personal = ['/api/config', '/api/login', '/api/me', '/api/logout', '/api/auth/start'].includes(c.req.path)
+    || c.req.path === '/api/accounts' || c.req.path.startsWith('/api/accounts/');
+  if (!personal && !c.get('session')?.tenant_id)
+    return c.json({ error: '请先加入或创建门店，再访问客户和业务资料' }, 403);
+  return next();
+});
 app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
 app.get('/api/auth/start', (c) => c.redirect('/'));
 app.post('/api/login', async (c) => {

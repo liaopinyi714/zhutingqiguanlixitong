@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { generateKeyPair, exportJWK, SignJWT } from 'jose';
 import { app } from '../server/index';
 import { readStaffAccounts } from '../server/auth';
+import { purgeExpiredRecords } from '../server/retention';
 import { configErrors, readConfig } from '../scripts/production-config.mjs';
 
 let db: DatabaseSync,
@@ -114,21 +115,123 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  it('移除初始门店配置不改变已有成员关系，账户和门店权限独立', async () => {
+    const jwt = await token();
+    await req('/me', jwt);
+    env.STAFF_ACCOUNTS = JSON.stringify([{ email: owner.email, name: owner.name, role: '店主' }]);
+    expect((await (await req('/me', jwt)).json() as any).tenant_id).toBe(owner.tenantId);
+    expect((await req('/customers', jwt)).status).toBe(200);
+    await purgeExpiredRecords(env);
+    expect((db.prepare('SELECT abandoned_at FROM stores WHERE id=?').get(owner.tenantId) as any).abandoned_at).toBeNull();
+  });
+  it('迁移保留原门店、成员和姓名头像，优先采用初始门店资料', () => {
+    const legacy = new DatabaseSync(':memory:');
+    try {
+      for (const file of readdirSync('migrations-production').filter((s) => s.endsWith('.sql') && !s.startsWith('0007')).sort())
+        legacy.exec(readFileSync('migrations-production/' + file, 'utf8'));
+      legacy.prepare("INSERT INTO accounts(email,tenant_id,name,store_name,source) VALUES(?,?,?,?,'config')")
+        .run(owner.email, owner.tenantId, '初始姓名', owner.storeName);
+      legacy.prepare('INSERT INTO stores(id,name) VALUES(?,?)').run(owner.tenantId, owner.storeName);
+      legacy.prepare("INSERT INTO store_memberships(email,tenant_id,name,source,avatar) VALUES(?,?,?,'config',?)")
+        .run(owner.email, owner.tenantId, '更新姓名', '旧头像');
+      legacy.exec(readFileSync('migrations-production/0007_independent_accounts.sql', 'utf8'));
+      const profile = legacy.prepare('SELECT name,avatar FROM accounts WHERE email=?').get(owner.email) as any;
+      expect(profile.name).toBe('更新姓名');
+      expect(profile.avatar).toBe('旧头像');
+      expect((legacy.prepare('SELECT enabled,left_at FROM store_memberships').get() as any).enabled).toBe(1);
+      expect((legacy.prepare('SELECT enabled,left_at FROM store_memberships').get() as any).left_at).toBeNull();
+      expect((legacy.prepare('SELECT id FROM stores').get() as any).id).toBe(owner.tenantId);
+    } finally { legacy.close(); }
+  });
+  it('后台撤销最后一位成员后，门店经过保留期清理，旧账户不能靠数据库重新登录', async () => {
+    const jwt = await token();
+    await req('/customers', jwt, 'POST', profile);
+    env.STAFF_ACCOUNTS = JSON.stringify([{ email: 'replacement@example.com', name: '替代账户', role: '店主' }]);
+    const now = new Date();
+    await purgeExpiredRecords(env, now);
+    expect((db.prepare('SELECT abandoned_at FROM stores WHERE id=?').get(owner.tenantId) as any).abandoned_at).toBeTruthy();
+    expect((db.prepare('SELECT COUNT(*) n FROM customers').get() as any).n).toBe(1);
+    await purgeExpiredRecords(env, new Date(now.getTime() + 31 * 86400000));
+    expect((db.prepare('SELECT COUNT(*) n FROM customers').get() as any).n).toBe(0);
+    expect((await req('/me', jwt)).status).toBe(403);
+    env.STAFF_ACCOUNTS = JSON.stringify([owner]);
+    expect((await (await req('/me', jwt)).json() as any).tenant_id).toBe('');
+    expect((await req('/accounts/stores/' + owner.tenantId + '/restore', jwt, 'POST')).status).toBe(404);
+  });
+  it('缺失或损坏后台名单不能被当作无人管理而误删门店', async () => {
+    const jwt = await token();
+    await req('/customers', jwt, 'POST', profile);
+    env.STAFF_ACCOUNTS = 'invalid';
+    await expect(purgeExpiredRecords(env)).rejects.toThrow();
+    expect((db.prepare('SELECT abandoned_at FROM stores WHERE id=?').get(owner.tenantId) as any).abandoned_at).toBeNull();
+    expect((db.prepare('SELECT COUNT(*) n FROM customers').get() as any).n).toBe(1);
+    env.STAFF_ACCOUNTS = undefined;
+    await purgeExpiredRecords(env);
+    expect((db.prepare('SELECT abandoned_at FROM stores WHERE id=?').get(owner.tenantId) as any).abandoned_at).toBeNull();
+  });
+  it('后台可提供不关联门店的账户，只能使用个人页面和创建门店', async () => {
+    env.STAFF_ACCOUNTS = JSON.stringify([{ email: owner.email, name: owner.name, role: '店主' }]);
+    const jwt = await token();
+    const me = await (await req('/me', jwt)).json() as any;
+    expect(me.tenant_id).toBe('');
+    expect(await (await req('/accounts/stores', jwt)).json()).toEqual([]);
+    expect((await req('/accounts', jwt, 'PUT', { email: owner.email, name: '独立账户', enabled: true })).status).toBe(200);
+    for (const path of ['/customers', '/export', '/devices', '/repairs', '/search?q=a'])
+      expect((await req(path, jwt)).status).toBe(403);
+    expect((await req('/customers', jwt, 'POST', profile)).status).toBe(403);
+    const created = await (await req('/accounts/stores', jwt, 'POST', { name: '第一家店' })).json() as any;
+    expect((await req('/accounts/stores/' + created.id + '/switch', jwt, 'POST')).status).toBe(200);
+    expect((await (await req('/me', jwt)).json() as any).name).toBe('独立账户');
+  });
+  it('退出仅撤销自己的权限，恢复仅本人有效，停用能撤销恢复资格', async () => {
+    const second = { ...owner, email: 'second@example.com', name: '同事' };
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, second]);
+    const jwt = await token(), secondJwt = await token({ email: second.email });
+    await req('/me', jwt);
+    expect((await req('/accounts/stores/' + owner.tenantId + '/leave', secondJwt, 'POST')).status).toBe(200);
+    expect((await (await req('/me', secondJwt)).json() as any).tenant_id).toBe('');
+    expect((await req('/customers', secondJwt)).status).toBe(403);
+    expect((await req('/customers', jwt)).status).toBe(200);
+    expect((db.prepare('SELECT abandoned_at FROM stores WHERE id=?').get(owner.tenantId) as any).abandoned_at).toBeNull();
+    expect((await req('/accounts/stores/' + owner.tenantId + '/rejoin', jwt, 'POST')).status).toBe(403);
+    expect((await req('/accounts/stores/' + owner.tenantId + '/rejoin', secondJwt, 'POST')).status).toBe(200);
+    await req('/accounts/stores/' + owner.tenantId + '/leave', secondJwt, 'POST');
+    expect((await req('/accounts', jwt, 'PUT', { email: second.email, enabled: false })).status).toBe(200);
+    expect((await req('/accounts/stores/' + owner.tenantId + '/rejoin', secondJwt, 'POST')).status).toBe(403);
+    expect(await (await req('/accounts/stores/left', secondJwt)).json()).toEqual([]);
+    expect((await req('/accounts', jwt, 'PUT', { email: second.email, enabled: true })).status).toBe(200);
+    expect((await req('/customers', secondJwt)).status).toBe(200);
+  });
+  it('自行退出超过 30 天不能恢复，门店尚有成员时仍可重新获准加入', async () => {
+    const second = { ...owner, email: 'second@example.com' };
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, second]);
+    const jwt = await token(), secondJwt = await token({ email: second.email });
+    await req('/me', jwt);
+    await req('/accounts/stores/' + owner.tenantId + '/leave', secondJwt, 'POST');
+    db.prepare("UPDATE store_memberships SET left_at='2000-01-01 00:00:00' WHERE email=?").run(second.email);
+    expect((await req('/accounts/stores/' + owner.tenantId + '/rejoin', secondJwt, 'POST')).status).toBe(403);
+    expect((await req('/customers', secondJwt)).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: second.email, enabled: true })).status).toBe(200);
+    expect((await req('/customers', secondJwt)).status).toBe(200);
+  });
   it('门店删除立即撤销同事已有 JWT 的访问，其他门店不能恢复该店', async () => {
     const jwt = await token();
     const created = await (await req('/accounts/stores', jwt, 'POST', { name: '新门店' })).json() as any;
     const switched = await req('/accounts/stores/' + created.id + '/switch', jwt, 'POST');
     const selected = switched.headers.get('Set-Cookie')!.split(';')[0];
     const colleague = { email: 'colleague@example.com', name: '同事', enabled: true };
+    const provided = { ...owner, ...colleague, tenantId: created.id, storeName: '新门店' };
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, provided]);
     expect((await req('/accounts', jwt, 'PUT', colleague, { Cookie: selected })).status).toBe(200);
     const colleagueJwt = await token({ email: colleague.email });
     expect((await req('/me', colleagueJwt)).status).toBe(200);
     const deleted = await req('/accounts/stores/' + created.id, jwt, 'DELETE', { name: '新门店' }, { Cookie: selected });
     expect(deleted.status).toBe(200);
-    expect((await req('/me', colleagueJwt)).status).toBe(403);
+    expect((await req('/me', colleagueJwt)).status).toBe(200);
+    expect((await (await req('/me', colleagueJwt)).json() as any).tenant_id).toBe('');
     expect((await req('/customers', colleagueJwt)).status).toBe(403);
     const outsider = { ...owner, email: 'other@example.com', tenantId: 'other-store', storeName: '另一门店' };
-    env.STAFF_ACCOUNTS = JSON.stringify([owner, outsider]);
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, provided, outsider]);
     const outsiderJwt = await token({ email: outsider.email });
     expect(await (await req('/accounts/stores/removed', outsiderJwt)).json()).toEqual([]);
     expect((await req('/accounts/stores/' + created.id + '/restore', outsiderJwt, 'POST')).status).toBe(404);
@@ -231,107 +334,68 @@ describe('正式环境', () => {
     expect(await (await req('/customers', jwt)).json()).toEqual([]);
     expect((await req(`/customers/${saved.id}/detail`, jwt)).status).toBe(404);
   });
-  it('账户名称可修改，新增店主通过有效 JWT 登录，停用立即生效且不能停用自己', async () => {
+  it('只有后台授权邮箱可以加入，姓名头像仅本人可改，撤权立即生效', async () => {
     const jwt = await token();
-    expect(
-      (await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: true }))
-        .status,
-    ).toBe(200);
-    expect(((await (await req('/me', jwt)).json()) as any).name).toBe('新名称');
-    expect(
-      (await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: false }))
-        .status,
-    ).toBe(400);
+    expect((await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: true })).status).toBe(200);
+    expect((await (await req('/me', jwt)).json() as any).name).toBe('新名称');
+    expect((await req('/accounts', jwt, 'PUT', { email: owner.email, name: '新名称', enabled: false })).status).toBe(400);
     const colleague = { email: 'second@example.com', name: '另一店主', enabled: true };
     const secondJwt = await token({ email: colleague.email });
+    expect((await req('/accounts', jwt, 'PUT', colleague)).status).toBe(403);
+    expect(db.prepare('SELECT * FROM accounts WHERE email=?').get(colleague.email)).toBeUndefined();
+    // Even a legacy managed database profile and membership are insufficient.
+    db.prepare("INSERT INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'managed')")
+      .run(colleague.email, owner.tenantId, colleague.name, owner.storeName);
+    db.prepare("INSERT INTO store_memberships(email,tenant_id,name,enabled,source) VALUES(?,?,?,1,'managed')")
+      .run(colleague.email, owner.tenantId, colleague.name);
     expect((await req('/me', secondJwt)).status).toBe(403);
-    expect((await req('/accounts', jwt, 'PUT', colleague)).status).toBe(200);
-    expect(((await (await req('/me', secondJwt)).json()) as any).role).toBe('店主');
-    expect((await req('/accounts', jwt, 'PUT', { ...colleague, enabled: false })).status).toBe(200);
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, { ...owner, email: colleague.email, name: colleague.name }]);
+    expect((await req('/accounts', jwt, 'PUT', { email: colleague.email, enabled: true })).status).toBe(200);
+    expect((await req('/me', secondJwt)).status).toBe(200);
+    expect((await req('/accounts', jwt, 'PUT', { ...colleague, name: '被他人更改' })).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: colleague.email, enabled: true, avatar: '' })).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: colleague.email, enabled: false })).status).toBe(200);
+    const me = await (await req('/me', secondJwt)).json() as any;
+    expect(me.tenant_id).toBe('');
+    expect((await req('/customers', secondJwt)).status).toBe(403);
+    expect((await req('/accounts/stores/' + owner.tenantId + '/rejoin', secondJwt, 'POST')).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: colleague.email, enabled: true })).status).toBe(200);
+    env.STAFF_ACCOUNTS = JSON.stringify([owner]);
     expect((await req('/me', secondJwt)).status).toBe(403);
     expect((await req('/customers', secondJwt)).status).toBe(403);
-    expect((await req('/accounts', jwt, 'PUT', colleague)).status).toBe(200);
-    expect((await req('/me', secondJwt)).status).toBe(200);
-    expect(
-      (db.prepare("SELECT COUNT(*) n FROM audit WHERE action LIKE '%店主账户%'").get() as any).n,
-    ).toBe(4);
-    env.STAFF_ACCOUNTS = JSON.stringify([{ ...owner, email: 'replacement@example.com' }]);
-    expect((await req('/me', jwt)).status).toBe(403);
+    expect((await (await req('/accounts', jwt)).json() as any[]).some((row) => row.email === colleague.email)).toBe(false);
   });
-  it('账户可以获授权访问多店，未经授权不能切换，门店档案仍隔离', async () => {
+  it('已有账户可加入多个门店，档案隔离，停用门店权限不影响其他门店', async () => {
     const jwt = await token();
-    const other = {
-      ...owner,
-      email: 'other@example.com',
-      tenantId: 'store-002',
-      storeName: '另一门店',
-    };
+    const other = { ...owner, email: 'other@example.com', tenantId: 'store-002', storeName: '另一门店' };
     env.STAFF_ACCOUNTS = JSON.stringify([owner, other]);
-    const customer = (await (await req('/customers', jwt, 'POST', profile)).json()) as any;
+    const customer = await (await req('/customers', jwt, 'POST', profile)).json() as any;
     const otherJwt = await token({ email: other.email });
     expect((await req('/customers/' + customer.id + '/detail', otherJwt)).status).toBe(404);
     expect((await req('/accounts/stores/store-001/switch', otherJwt, 'POST')).status).toBe(403);
-    expect((await req('/accounts', jwt, 'PUT', {
-      email: other.email, name: other.name, enabled: true,
-    })).status).toBe(200);
-    expect(
-      (await req('/accounts', jwt, 'PUT', { email: 'bad', name: '', enabled: true })).status,
-    ).toBe(400);
-    const managed = { email: 'managed@example.com', name: '店主二', enabled: true };
-    expect((await req('/accounts', jwt, 'PUT', managed)).status).toBe(200);
-    expect(
-      ((await (await req('/accounts', otherJwt)).json()) as any[]).map((a) => a.email),
-    ).toEqual([other.email]);
-    expect((await req('/accounts', otherJwt, 'PUT', managed)).status).toBe(200);
-    const managedJwt = await token({ email: managed.email });
-    expect(((await (await req('/accounts/stores', managedJwt)).json()) as any[])
-      .map((store) => store.id).sort()).toEqual(['store-001', 'store-002']);
-    expect((await req('/accounts/stores/store-002/switch', managedJwt, 'POST')).status).toBe(200);
+    expect((await req('/accounts', jwt, 'PUT', { email: other.email, enabled: true })).status).toBe(200);
     const switched = await req('/accounts/stores/store-001/switch', otherJwt, 'POST');
     expect(switched.status).toBe(200);
     const selected = switched.headers.get('Set-Cookie')!.split(';')[0];
-    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined,
-      { Cookie: selected })).status).toBe(200);
-    expect((await req('/accounts', otherJwt, 'PUT',
-      { email: other.email, name: other.name, enabled: false },
-      { Cookie: selected })).status).toBe(400);
-    expect((await req('/accounts', jwt, 'PUT', {
-      email: other.email, name: other.name, enabled: false,
-    })).status).toBe(200);
-    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined,
-      { Cookie: selected })).status).toBe(403);
-    expect(((await (await req('/me', otherJwt, 'GET', undefined,
-      { Cookie: selected })).json()) as any).tenant_id).toBe('store-002');
+    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined, { Cookie: selected })).status).toBe(200);
+    expect((await req('/accounts', jwt, 'PUT', { email: other.email, enabled: false })).status).toBe(200);
+    expect((await req('/customers/' + customer.id + '/detail', otherJwt, 'GET', undefined, { Cookie: selected })).status).toBe(403);
+    expect((await (await req('/me', otherJwt, 'GET', undefined, { Cookie: selected })).json() as any).tenant_id).toBe('store-002');
+    expect((await req('/accounts/stores/store-001/rejoin', otherJwt, 'POST')).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: 'unprovided@example.com', enabled: true })).status).toBe(403);
     expect((await req('/accounts')).status).toBe(401);
-    expect(
-      (await req('/accounts', await token({ email: 'stranger@example.com' }), 'PUT', managed))
-        .status,
-    ).toBe(403);
+    expect((await req('/accounts', await token({ email: 'stranger@example.com' }), 'PUT', { email: other.email, enabled: true })).status).toBe(403);
   });
-  it('停用配置中的店主同样会拒绝已有 JWT，旧角色不会自动变为店主', async () => {
+  it('停用仅影响成员关系，旧角色不会自动变为店主', async () => {
     const second = { ...owner, email: 'second@example.com' };
-    env.STAFF_ACCOUNTS = JSON.stringify([
-      owner,
-      second,
-      { ...owner, email: 'legacy@example.com', role: '前台' },
-    ]);
+    env.STAFF_ACCOUNTS = JSON.stringify([owner, second, { ...owner, email: 'legacy@example.com', role: '前台' }]);
     const jwt = await token();
-    expect(
-      (
-        await req('/accounts', jwt, 'PUT', {
-          email: second.email,
-          name: second.name,
-          enabled: false,
-        })
-      ).status,
-    ).toBe(200);
-    expect((await req('/me', await token({ email: second.email }))).status).toBe(403);
+    expect((await req('/accounts', jwt, 'PUT', { email: second.email, enabled: false })).status).toBe(200);
+    const secondJwt = await token({ email: second.email });
+    expect((await (await req('/me', secondJwt)).json() as any).tenant_id).toBe('');
+    expect((await req('/export', secondJwt)).status).toBe(403);
     expect((await req('/me', await token({ email: 'legacy@example.com' }))).status).toBe(403);
-    expect(
-      ((await (await req('/accounts', jwt)).json()) as any[]).some(
-        (a) => a.email === 'legacy@example.com',
-      ),
-    ).toBe(false);
+    expect((await (await req('/accounts', jwt)).json() as any[]).some((a) => a.email === 'legacy@example.com')).toBe(false);
   });
   it('拒绝跨站写入、缺少校验头及过大请求', async () => {
     const jwt = await token();

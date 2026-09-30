@@ -12,7 +12,7 @@ const staff = readStaffAccounts(
 );
 if (staff.some((row) => row.email.endsWith('@example.com')))
   throw new Error('请把示例邮箱改成真实员工邮箱');
-for (const tenant of new Set(staff.map((row) => row.tenantId))) {
+for (const tenant of new Set(staff.map((row) => row.tenantId).filter(Boolean))) {
   if (!staff.some((row) => row.tenantId === tenant && row.role === '店主'))
     throw new Error('每个门店至少配置一位店主');
 }
