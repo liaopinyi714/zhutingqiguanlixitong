@@ -44,6 +44,8 @@ import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
 import { api } from './api';
+import { RequestOrder } from './requestOrder';
+import { refreshAfterWrite } from './refreshAfterWrite';
 import { useWorkspaceData } from './useWorkspaceData';
 import { PageNavigation } from './PageNavigation';
 import {
@@ -127,6 +129,7 @@ export default function App() {
   const accountDirty = useRef(false);
   const accountBusy = useRef(false);
   const dataSession = useRef(0);
+  const detailOrder = useRef(new RequestOrder());
   const draftSnapshot = useRef('');
   const { route, update: updateRoute } = useWorkspaceRoute(() => {
     if (!canLeaveEditor()) return false;
@@ -271,24 +274,36 @@ export default function App() {
     return placeholder ?? <LoadingRows lines={lines} />;
   }
   const dataReady = (...keys: Dataset[]) => keys.every((key) => dataState[key] === 'ready');
-  async function loadDetail(key: string) {
+  async function loadDetail(key: string, saved = false): Promise<Detail | null> {
     const session = dataSession.current;
+    const latestDetail = detailOrder.current.begin('detail');
+    const latestRemoved = detailOrder.current.begin('removed');
+    const current = () => selectedCustomerRef.current === key && session === dataSession.current;
+    let loaded: Detail | null = null;
     setDetailError(false);
-    try {
-      const data = await api(`/customers/${key}/detail`);
-      if (selectedCustomerRef.current === key && session === dataSession.current) setDetail(data);
-    } catch (e) {
-      if (selectedCustomerRef.current === key && session === dataSession.current) {
-        setDetailError(true);
-        setError((e as Error).message);
-      }
-    }
+    // Both reads start together; each applies only its latest in-scope result.
     api(`/customers/${key}/removed`)
       .then((rows) => {
-        if (selectedCustomerRef.current === key && session === dataSession.current)
-          setRemoved(rows);
+        if (current() && latestRemoved()) setRemoved(rows);
       })
       .catch(() => {});
+    try {
+      const data = await api(`/customers/${key}/detail`);
+      if (current() && latestDetail()) {
+        setDetail(data);
+        loaded = data;
+      }
+    } catch (e) {
+      if (current() && latestDetail()) {
+        setDetailError(true);
+        setError(
+          saved
+            ? '操作已保存，但最新档案暂时无法加载。请刷新页面，勿重复提交。'
+            : (e as Error).message,
+        );
+      }
+    }
+    return loaded;
   }
   useEffect(() => {
     let cancelled = false;
@@ -329,32 +344,18 @@ export default function App() {
     };
   }, [role, identity.tenant_id]);
   useEffect(() => {
-    let cancelled = false;
     if (selected && role) {
       setDetail(null);
       setDetailError(false);
       setRemoved({ exams: [], fittings: [], repairs: [], followups: [], attachments: [] });
-      api(`/customers/${selected}/detail`)
-        .then((data) => {
-          if (!cancelled) setDetail(data);
-        })
-        .catch((e) => {
-          if (!cancelled) {
-            setDetailError(true);
-            setError(e.message);
-          }
-        });
-      api(`/customers/${selected}/removed`)
-        .then((rows) => {
-          if (!cancelled) setRemoved(rows);
-        })
-        .catch(() => {});
+      void loadDetail(selected);
       setExamIndex(0);
     }
     return () => {
-      cancelled = true;
+      detailOrder.current.begin('detail');
+      detailOrder.current.begin('removed');
     };
-  }, [selected, role]);
+  }, [selected, role, identity.tenant_id]);
   useEffect(() => {
     if (!role || !searchOpen || !globalQuery.trim()) {
       setGlobalResults([]);
@@ -392,7 +393,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [globalQuery, searchOpen, role]);
+  }, [globalQuery, searchOpen, role, identity.tenant_id]);
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
@@ -643,7 +644,6 @@ export default function App() {
   }) {
     const created = await api('/intakes', 'POST', payload);
     intakeDirty.current = false;
-    await refresh();
     openCustomer(created.id);
     flash('客户档案及所选服务记录已保存');
   }
@@ -663,10 +663,14 @@ export default function App() {
         `/customers/${customerId}/${kind}/${recordId}${restore ? '/restore' : ''}`,
         restore ? 'POST' : 'DELETE',
       );
-      await Promise.all([
-        selected === customerId ? loadDetail(customerId) : Promise.resolve(),
-        refresh(),
-      ]);
+      await refreshAfterWrite(
+        () =>
+          Promise.all([
+            selected === customerId ? loadDetail(customerId, true) : Promise.resolve(),
+            refresh(),
+          ]),
+        setError,
+      );
       setExamIndex(0);
       flash(restore ? '记录已恢复' : '记录已删除，30 天内可恢复');
     } catch (reason) {
@@ -688,7 +692,7 @@ export default function App() {
     try {
       await api(`/customers/${recordId}${restore ? '/restore' : ''}`, restore ? 'POST' : 'DELETE');
       if (!restore && selected === recordId) setSelected(null);
-      await refresh(!restore && selected === recordId);
+      await refreshAfterWrite(() => refresh(!restore && selected === recordId), setError);
       flash(restore ? '客户档案已恢复' : '客户档案已删除，30 天内可恢复');
     } catch (reason) {
       setError((reason as Error).message);
@@ -710,7 +714,7 @@ export default function App() {
         `/customers/${selected}/attachments/${recordId}${restore ? '/restore' : ''}`,
         restore ? 'POST' : 'DELETE',
       );
-      await loadDetail(selected);
+      await loadDetail(selected, true);
       flash(restore ? '报告已恢复' : '报告已删除，30 天内可恢复');
     } catch (reason) {
       setError((reason as Error).message);
@@ -724,8 +728,8 @@ export default function App() {
     setError('');
     try {
       await api(`/customers/${customer.id}/profile`, 'PUT', { ...customer, [field]: editingValue });
-      await refresh();
       setEditingField('');
+      await refreshAfterWrite(refresh, setError);
       flash('资料已更新');
     } catch (reason) {
       setError((reason as Error).message);
@@ -777,12 +781,17 @@ export default function App() {
         );
       if (editorKind === 'complete')
         await api(`/followups/${draft.id}`, 'PUT', { result: draft.result });
-      await refresh();
+      // The write is confirmed. Close the editor before any refresh that could
+      // fail, so a slow connection cannot turn a retry into a duplicate record.
+      setEditorKind('');
       if (key) {
         setSelected(key);
-        latestDetail = await api(`/customers/${key}/detail`);
-        setDetail(latestDetail);
       }
+      latestDetail =
+        (await refreshAfterWrite(async () => {
+          await refresh();
+          return key && key === selected ? loadDetail(key, true) : null;
+        }, setError)) ?? null;
       if (editorKind === 'exam') {
         setExamEditorVersion((version) => version + 1);
         setTab('听力检查');
@@ -801,7 +810,6 @@ export default function App() {
         setPage('customers');
         setTab('概览');
       }
-      setEditorKind('');
       flash('记录已保存');
     } catch (e) {
       setError((e as Error).message);
@@ -816,7 +824,7 @@ export default function App() {
       const data = new FormData();
       data.append('file', file);
       await api(`/customers/${selected}/attachments`, 'POST', data);
-      await loadDetail(selected);
+      await loadDetail(selected, true);
       flash('报告已上传');
     } catch (e) {
       setError((e as Error).message);
@@ -845,7 +853,7 @@ export default function App() {
     setExcelBusy(kind);
     setError('');
     try {
-      const snapshot = await api('/export/spreadsheet');
+      const snapshot = await api('/export/spreadsheet?kind=' + kind);
       const [{ makeSheets }, { buildXlsx }] = await Promise.all([
         import('./spreadsheetExport'),
         import('./xlsx'),

@@ -21,7 +21,9 @@ function cell(value: Cell | undefined, address: string, style = 0): string {
   if (typeof value === 'number' && Number.isFinite(value)) return `<c${attr}><v>${value}</v></c>`;
   const source = String(value);
   if (source.length > 32767)
-    throw new Error(`单元格 ${address} 超过 Excel 的字符上限，请减少该客户的历史验配记录后再导出`);
+    throw new Error(
+      `单元格 ${address} 超过 Excel 的字符上限，请使用 JSON 导出保留完整资料，并联系维护者调整表格布局`,
+    );
   // inlineStr forces user-entered values, including =, + and @, to stay text.
   return `<c${attr} t="inlineStr"><is><t xml:space="preserve">${xml(source)}</t></is></c>`;
 }

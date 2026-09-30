@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AccountAvatar, avatarThumbnail } from './AccountAvatar';
 import { RequestOrder } from './requestOrder';
+import { refreshAfterWrite } from './refreshAfterWrite';
 import { BUSINESS_TIME_ZONE, DAY_MS, RETENTION_DAYS, timestamp } from '../shared/calendar';
 
 type Account = {
@@ -344,7 +345,7 @@ export function Accounts({
     setError('');
     try {
       await api('/accounts/stores/' + encodeURIComponent(store.id) + '/restore', 'POST');
-      await loadStores();
+      await refreshAfterWrite(loadStores, setError);
       setNotice('门店已恢复');
     } catch (reason) {
       setError((reason as Error).message);
@@ -437,8 +438,10 @@ export function Accounts({
         await api('/accounts/stores/' + encodeURIComponent(identity.tenant_id), 'PATCH', { name });
         setStoreMode('');
         dirty(false);
-        await updated();
-        await load();
+        await refreshAfterWrite(async () => {
+          await updated();
+          await load();
+        }, setError);
         setNotice('门店名称已更新');
       }
     } catch (e) {
@@ -495,8 +498,10 @@ export function Accounts({
       );
       setDraft(null);
       dirty(false);
-      await load();
-      await updated();
+      await refreshAfterWrite(async () => {
+        await load();
+        await updated();
+      }, setError);
       setNotice(
         adding ? '已有店主已加入当前门店' : value.self ? '个人资料已保存' : '门店访问权限已更新',
       );

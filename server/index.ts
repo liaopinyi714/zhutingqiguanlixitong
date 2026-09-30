@@ -14,16 +14,26 @@ import { isLocalDemo } from './auth';
 import { accountRoutes } from './accounts';
 import { installHttpBoundary } from './http';
 import { exportRoutes } from './exports';
+import { attachmentRoutes } from './attachments';
 import { installReadRoutes } from './read-model';
 import type { Env, AppContext } from './types';
+import {
+  activeCustomerWrite,
+  activeFittingWrite,
+  activeStoreWrite,
+  auditAfterWrite,
+  commitWrite,
+  WriteConflictError,
+} from './mutations';
 export const app = new Hono<AppContext>();
 const id = () => crypto.randomUUID();
 installHttpBoundary(app);
 app.get('/api/config', (c) => c.json({ demo: isLocalDemo(c.env, c.req.url) }));
 app.get('/api/auth/start', (c) => c.redirect('/'));
 app.post('/api/login', async (c) => {
-  const data = await c.req.json();
-  if (data.role !== '店主') return c.json({ error: '仅支持店主登录' }, 400);
+  const parsed = z.object({ role: z.literal('店主') }).safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: '仅支持店主登录' }, 400);
+  const data = parsed.data;
   const token = id() + id();
   await c.env.DB.prepare('DELETE FROM sessions WHERE expires_at<?').bind(Date.now()).run();
   await c.env.DB.prepare('INSERT INTO sessions VALUES(?,?,?,?)')
@@ -91,9 +101,12 @@ app.post('/api/customers', async (c) => {
   const s = c.get('session'),
     d = p.data,
     key = id();
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      `INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${activeStoreWrite} RETURNING id`,
     ).bind(
       key,
       s.tenant_id,
@@ -108,11 +121,12 @@ app.post('/api/customers', async (c) => {
       d.status,
       d.history,
       d.needs,
+      s.tenant_id,
+      s.email,
     ),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '创建客户档案', key),
-  ]);
+    '创建客户档案',
+    key,
+  );
   return c.json({ id: key }, 201);
 });
 app.post('/api/intakes', async (c) => {
@@ -142,7 +156,8 @@ app.post('/api/intakes', async (c) => {
     p = d.customer;
   const statements = [
     c.env.DB.prepare(
-      'INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      `INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,history,needs)
+       SELECT ?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${activeStoreWrite} RETURNING id`,
     ).bind(
       customerId,
       s.tenant_id,
@@ -157,43 +172,65 @@ app.post('/api/intakes', async (c) => {
       p.status,
       p.history,
       p.needs,
+      s.tenant_id,
+      s.email,
     ),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '创建客户档案', customerId),
+    auditAfterWrite(c.env.DB, s, '创建客户档案', customerId),
   ];
   if (d.exam) {
     statements.push(
       c.env.DB.prepare(
-        'INSERT INTO exams(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, customerId, d.exam.date, JSON.stringify(d.exam)),
+        `INSERT INTO exams(id,tenant_id,customer_id,date,data) SELECT ?,?,?,?,? WHERE ${activeCustomerWrite}`,
+      ).bind(
+        id(),
+        s.tenant_id,
+        customerId,
+        d.exam.date,
+        JSON.stringify(d.exam),
+        customerId,
+        s.tenant_id,
+        s.email,
+      ),
     );
-    statements.push(
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.actor, '建档时录入听力检查', customerId),
-    );
+    statements.push(auditAfterWrite(c.env.DB, s, '建档时录入听力检查', customerId));
   }
   if (fitting) {
     statements.push(
       c.env.DB.prepare(
-        'INSERT INTO fittings(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, customerId, fitting.date, JSON.stringify(fitting)),
+        `INSERT INTO fittings(id,tenant_id,customer_id,date,data) SELECT ?,?,?,?,? WHERE ${activeCustomerWrite}`,
+      ).bind(
+        id(),
+        s.tenant_id,
+        customerId,
+        fitting.date,
+        JSON.stringify(fitting),
+        customerId,
+        s.tenant_id,
+        s.email,
+      ),
     );
-    statements.push(
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.actor, '建档时录入验配', customerId),
-    );
+    statements.push(auditAfterWrite(c.env.DB, s, '建档时录入验配', customerId));
   }
   if (d.followup) {
     statements.push(
       c.env.DB.prepare(
-        'INSERT INTO followups(id,tenant_id,customer_id,due,type,note) VALUES(?,?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, customerId, d.followup.due, d.followup.type, d.followup.note),
+        `INSERT INTO followups(id,tenant_id,customer_id,due,type,note) SELECT ?,?,?,?,?,? WHERE ${activeCustomerWrite}`,
+      ).bind(
+        id(),
+        s.tenant_id,
+        customerId,
+        d.followup.due,
+        d.followup.type,
+        d.followup.note,
+        customerId,
+        s.tenant_id,
+        s.email,
+      ),
+      auditAfterWrite(c.env.DB, s, '建档时安排随访', customerId),
     );
   }
-  await c.env.DB.batch(statements);
+  const [created] = await c.env.DB.batch(statements);
+  if (!created.results.length) throw new WriteConflictError();
   return c.json({ id: customerId }, 201);
 });
 app.delete('/api/customers/:id', async (c) => {
@@ -206,14 +243,16 @@ app.delete('/api/customers/:id', async (c) => {
     .bind(key, s.tenant_id)
     .first();
   if (!row) return c.json({ error: '档案不存在或已删除' }, 404);
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND deleted_at IS NULL',
-    ).bind(key, s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '删除客户档案', key),
-  ]);
+      `UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND deleted_at IS NULL
+       AND ${activeStoreWrite} RETURNING id`,
+    ).bind(key, s.tenant_id, s.tenant_id, s.email),
+    '删除客户档案',
+    key,
+  );
   return c.json({ ok: true });
 });
 app.post('/api/customers/:id/restore', async (c) => {
@@ -226,16 +265,16 @@ app.post('/api/customers/:id/restore', async (c) => {
     .bind(key, s.tenant_id, retentionCutoff())
     .first();
   if (!row) return c.json({ error: '已删除档案不存在' }, 404);
-  const [restored] = await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      "UPDATE customers SET deleted_at=NULL WHERE id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days') RETURNING id",
-    ).bind(key, s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
-    ).bind(id(), s.tenant_id, s.actor, '恢复客户档案', key),
-  ]);
-  if (!restored.results.length)
-    return c.json({ error: '记录状态已变化或恢复期已过，请刷新后重试' }, 409);
+      `UPDATE customers SET deleted_at=NULL WHERE id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days')
+       AND ${activeStoreWrite} RETURNING id`,
+    ).bind(key, s.tenant_id, s.tenant_id, s.email),
+    '恢复客户档案',
+    key,
+  );
   return c.json({ ok: true });
 });
 app.use('/api/customers/:id/*', async (c, next) => {
@@ -279,9 +318,12 @@ app.put('/api/customers/:id/profile', async (c) => {
   const d = p.data,
     s = c.get('session'),
     k = c.req.param('id');
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'UPDATE customers SET name=?,gender=?,birth_date=?,phone=?,contact=?,contact_phone=?,address=?,source=?,status=?,history=?,needs=? WHERE id=? AND tenant_id=?',
+      `UPDATE customers SET name=?,gender=?,birth_date=?,phone=?,contact=?,contact_phone=?,address=?,source=?,status=?,history=?,needs=?
+       WHERE id=? AND tenant_id=? AND deleted_at IS NULL AND ${activeStoreWrite} RETURNING id`,
     ).bind(
       d.name,
       d.gender,
@@ -296,11 +338,12 @@ app.put('/api/customers/:id/profile', async (c) => {
       d.needs,
       k,
       s.tenant_id,
+      s.tenant_id,
+      s.email,
     ),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '更新客户档案', k),
-  ]);
+    '更新客户档案',
+    k,
+  );
   return c.json({ ok: true });
 });
 for (const [path, schema, resource, label] of [
@@ -328,17 +371,23 @@ for (const [path, schema, resource, label] of [
     const statement =
       path === 'followups'
         ? c.env.DB.prepare(
-            'INSERT INTO followups(id,tenant_id,customer_id,due,type,note) VALUES(?,?,?,?,?,?)',
-          ).bind(k, s.tenant_id, customer, d.due, d.type, d.note)
+            `INSERT INTO followups(id,tenant_id,customer_id,due,type,note) SELECT ?,?,?,?,?,?
+             WHERE ${activeCustomerWrite} RETURNING id`,
+          ).bind(k, s.tenant_id, customer, d.due, d.type, d.note, customer, s.tenant_id, s.email)
         : c.env.DB.prepare(
-            `INSERT INTO ${path}(id,tenant_id,customer_id,date,data) VALUES(?,?,?,?,?)`,
-          ).bind(k, s.tenant_id, customer, d.date, JSON.stringify(d));
-    await c.env.DB.batch([
-      statement,
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.actor, label, customer),
-    ]);
+            `INSERT INTO ${path}(id,tenant_id,customer_id,date,data) SELECT ?,?,?,?,?
+             WHERE ${activeCustomerWrite} RETURNING id`,
+          ).bind(
+            k,
+            s.tenant_id,
+            customer,
+            d.date,
+            JSON.stringify(d),
+            customer,
+            s.tenant_id,
+            s.email,
+          );
+    await commitWrite(c.env.DB, s, statement, label, customer);
     return c.json({ id: k }, 201);
   });
 }
@@ -369,14 +418,25 @@ for (const [kind, schema, resource, label] of [
       .first<{ data: string }>();
     if (!existing) return c.json({ error: '记录不存在或已删除' }, 404);
     const data: any = parsed.data;
-    await c.env.DB.batch([
+    await commitWrite(
+      c.env.DB,
+      s,
       c.env.DB.prepare(
-        `UPDATE ${kind} SET date=?,data=? WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL`,
-      ).bind(data.date, JSON.stringify(data), record, customer, s.tenant_id),
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.actor, label, customer),
-    ]);
+        `UPDATE ${kind} SET date=?,data=? WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL
+         AND ${activeCustomerWrite} RETURNING id`,
+      ).bind(
+        data.date,
+        JSON.stringify(data),
+        record,
+        customer,
+        s.tenant_id,
+        customer,
+        s.tenant_id,
+        s.email,
+      ),
+      label,
+      customer,
+    );
     return c.json({ ok: true });
   });
 }
@@ -419,26 +479,44 @@ for (const method of ['post', 'put'] as const) {
         Number(d.warrantyCovered),
         d.notes,
       ];
-      await c.env.DB.batch([
+      await commitWrite(
+        c.env.DB,
+        s,
         method === 'post'
           ? c.env.DB.prepare(
               `INSERT INTO repairs(id,tenant_id,customer_id,fitting_id,occurred_date,received_date,completed_date,status,problem,findings,work_done,parts,price,warranty_covered,notes)
-             VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-            ).bind(recordId, s.tenant_id, customer, ...values)
+             SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE ${activeCustomerWrite} AND ${activeFittingWrite} RETURNING id`,
+            ).bind(
+              recordId,
+              s.tenant_id,
+              customer,
+              ...values,
+              customer,
+              s.tenant_id,
+              s.email,
+              d.fittingId,
+              customer,
+              s.tenant_id,
+            )
           : c.env.DB.prepare(
               `UPDATE repairs SET fitting_id=?,occurred_date=?,received_date=?,completed_date=?,status=?,problem=?,findings=?,work_done=?,parts=?,price=?,warranty_covered=?,notes=?
-             WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL`,
-            ).bind(...values, recordId, customer, s.tenant_id),
-        c.env.DB.prepare(
-          'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-        ).bind(
-          id(),
-          s.tenant_id,
-          s.actor,
-          method === 'post' ? '新增维修记录' : '修改维修记录',
-          customer,
-        ),
-      ]);
+             WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL
+               AND ${activeCustomerWrite} AND ${activeFittingWrite} RETURNING id`,
+            ).bind(
+              ...values,
+              recordId,
+              customer,
+              s.tenant_id,
+              customer,
+              s.tenant_id,
+              s.email,
+              d.fittingId,
+              customer,
+              s.tenant_id,
+            ),
+        method === 'post' ? '新增维修记录' : '修改维修记录',
+        customer,
+      );
       return c.json(
         method === 'post' ? { id: recordId } : { ok: true },
         method === 'post' ? 201 : 200,
@@ -464,14 +542,29 @@ app.put('/api/customers/:id/followups/:recordId', async (c) => {
   if (existing.completed && !parsed.data.result?.trim())
     return c.json({ error: '已完成随访须保留联系结果' }, 400);
   const d = parsed.data;
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'UPDATE followups SET due=?,type=?,note=?,result=CASE WHEN completed=1 THEN ? ELSE result END WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL',
-    ).bind(d.due, d.type, d.note, d.result || '', record, customer, s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '修改随访记录', customer),
-  ]);
+      `UPDATE followups SET due=?,type=?,note=?,result=CASE WHEN completed=1 THEN ? ELSE result END
+       WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL AND ${activeCustomerWrite}
+         AND (completed=0 OR length(trim(?))>0) RETURNING id`,
+    ).bind(
+      d.due,
+      d.type,
+      d.note,
+      d.result || '',
+      record,
+      customer,
+      s.tenant_id,
+      customer,
+      s.tenant_id,
+      s.email,
+      d.result || '',
+    ),
+    '修改随访记录',
+    customer,
+  );
   return c.json({ ok: true });
 });
 app.get('/api/customers/:id/removed', async (c) => {
@@ -527,26 +620,22 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
       .bind(record, customer, s.tenant_id)
       .first();
     if (!existing) return c.json({ error: '记录不存在或已删除' }, 404);
-    await c.env.DB.batch([
+    await commitWrite(
+      c.env.DB,
+      s,
       c.env.DB.prepare(
-        `UPDATE ${kind} SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND customer_id=? AND tenant_id=?`,
-      ).bind(record, customer, s.tenant_id),
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(
-        id(),
-        s.tenant_id,
-        s.actor,
-        kind === 'exams'
-          ? '删除听力检查记录'
-          : kind === 'fittings'
-            ? '删除验配记录'
-            : kind === 'repairs'
-              ? '删除维修记录'
-              : '删除随访记录',
-        customer,
-      ),
-    ]);
+        `UPDATE ${kind} SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND customer_id=? AND tenant_id=?
+         AND deleted_at IS NULL AND ${activeCustomerWrite} RETURNING id`,
+      ).bind(record, customer, s.tenant_id, customer, s.tenant_id, s.email),
+      kind === 'exams'
+        ? '删除听力检查记录'
+        : kind === 'fittings'
+          ? '删除验配记录'
+          : kind === 'repairs'
+            ? '删除维修记录'
+            : '删除随访记录',
+      customer,
+    );
     return c.json({ ok: true });
   });
   app.post(`/api/customers/:id/${kind}/:recordId/restore`, async (c) => {
@@ -580,37 +669,32 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
         .first();
       if (!fitting) return c.json({ error: '请先恢复关联的验配记录' }, 400);
     }
-    const [restored] = await c.env.DB.batch([
+    await commitWrite(
+      c.env.DB,
+      s,
       c.env.DB.prepare(
         `UPDATE ${kind} SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days')
-         AND EXISTS(SELECT 1 FROM customers c WHERE c.id=${kind}.customer_id AND c.tenant_id=${kind}.tenant_id AND c.deleted_at IS NULL)
+         AND ${activeCustomerWrite}
          ${kind === 'repairs' ? 'AND EXISTS(SELECT 1 FROM fittings f WHERE f.id=repairs.fitting_id AND f.tenant_id=repairs.tenant_id AND f.customer_id=repairs.customer_id AND f.deleted_at IS NULL)' : ''} RETURNING id`,
-      ).bind(record, customer, s.tenant_id),
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
-      ).bind(
-        id(),
-        s.tenant_id,
-        s.actor,
-        kind === 'exams'
-          ? '恢复听力检查记录'
-          : kind === 'fittings'
-            ? '恢复验配记录'
-            : kind === 'repairs'
-              ? '恢复维修记录'
-              : '恢复随访记录',
-        customer,
-      ),
-    ]);
-    if (!restored.results.length)
-      return c.json({ error: '记录或关联资料状态已变化，请刷新后重试' }, 409);
+      ).bind(record, customer, s.tenant_id, customer, s.tenant_id, s.email),
+      kind === 'exams'
+        ? '恢复听力检查记录'
+        : kind === 'fittings'
+          ? '恢复验配记录'
+          : kind === 'repairs'
+            ? '恢复维修记录'
+            : '恢复随访记录',
+      customer,
+    );
     return c.json({ ok: true });
   });
 }
 app.put('/api/followups/:id', async (c) => {
-  const d = await c.req.json();
-  if (typeof d.result !== 'string' || !d.result.trim() || d.result.length > 3000)
-    return c.json({ error: '请填写本次回访结果' }, 400);
+  const parsed = z
+    .object({ result: z.string().trim().min(1).max(3000) })
+    .safeParse(await c.req.json());
+  if (!parsed.success) return c.json({ error: '请填写本次回访结果' }, 400);
+  const d = parsed.data;
   const s = c.get('session');
   const r = await c.env.DB.prepare(
     'SELECT f.customer_id FROM followups f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL WHERE f.id=? AND f.tenant_id=? AND f.deleted_at IS NULL',
@@ -618,118 +702,19 @@ app.put('/api/followups/:id', async (c) => {
     .bind(c.req.param('id'), s.tenant_id)
     .first<{ customer_id: string }>();
   if (!r) return c.json({ error: '记录不存在' }, 404);
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'UPDATE followups SET completed=1,result=?,completed_at=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=? AND deleted_at IS NULL',
-    ).bind(d.result, c.req.param('id'), s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '完成随访', r.customer_id),
-  ]);
+      `UPDATE followups SET completed=1,result=?,completed_at=CURRENT_TIMESTAMP
+       WHERE id=? AND tenant_id=? AND deleted_at IS NULL AND ${activeCustomerWrite} RETURNING id`,
+    ).bind(d.result, c.req.param('id'), s.tenant_id, r.customer_id, s.tenant_id, s.email),
+    '完成随访',
+    r.customer_id,
+  );
   return c.json({ ok: true });
 });
-app.post('/api/customers/:id/attachments', async (c) => {
-  if (Number(c.req.header('Content-Length') || 0) > 11 * 1024 * 1024)
-    return c.json({ error: '文件不能超过 10 MB' }, 413);
-  const data = await c.req.formData(),
-    file = data.get('file');
-  if (
-    !(file instanceof File) ||
-    file.size > 10 * 1024 * 1024 ||
-    !['application/pdf', 'image/jpeg', 'image/png'].includes(file.type)
-  )
-    return c.json({ error: '支持 10 MB 以内的 PDF、JPG、PNG' }, 400);
-  const bytes = await file.arrayBuffer(),
-    head = new Uint8Array(bytes);
-  const valid =
-    file.type === 'application/pdf'
-      ? String.fromCharCode(...head.slice(0, 5)) === '%PDF-'
-      : file.type === 'image/png'
-        ? head[0] === 137 && head[1] === 80 && head[2] === 78 && head[3] === 71
-        : head[0] === 255 && head[1] === 216 && head[2] === 255;
-  if (!valid) return c.json({ error: '文件内容与格式不符' }, 400);
-  const s = c.get('session'),
-    k = id(),
-    key = `${s.tenant_id}/${c.req.param('id')}/${k}`;
-  await c.env.FILES.put(key, bytes, { httpMetadata: { contentType: file.type } });
-  try {
-    await c.env.DB.batch([
-      c.env.DB.prepare(
-        'INSERT INTO attachments(id,tenant_id,customer_id,name,mime,size,object_key) VALUES(?,?,?,?,?,?,?)',
-      ).bind(k, s.tenant_id, c.req.param('id'), file.name.slice(0, 200), file.type, file.size, key),
-      c.env.DB.prepare(
-        'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-      ).bind(id(), s.tenant_id, s.actor, '上传检查报告', c.req.param('id')),
-    ]);
-  } catch (e) {
-    await c.env.FILES.delete(key);
-    throw e;
-  }
-  return c.json({ id: k }, 201);
-});
-app.delete('/api/customers/:id/attachments/:recordId', async (c) => {
-  const s = c.get('session'),
-    customer = c.req.param('id'),
-    record = c.req.param('recordId');
-  if (!canWrite(s.role, 'exam')) return c.json({ error: '当前角色无权删除报告附件' }, 403);
-  const existing = await c.env.DB.prepare(
-    'SELECT id FROM attachments WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL',
-  )
-    .bind(record, customer, s.tenant_id)
-    .first();
-  if (!existing) return c.json({ error: '附件不存在或已删除' }, 404);
-  await c.env.DB.batch([
-    c.env.DB.prepare(
-      'UPDATE attachments SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NULL',
-    ).bind(record, customer, s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) VALUES(?,?,?,?,?)',
-    ).bind(id(), s.tenant_id, s.actor, '删除报告附件', customer),
-  ]);
-  return c.json({ ok: true });
-});
-app.post('/api/customers/:id/attachments/:recordId/restore', async (c) => {
-  const s = c.get('session'),
-    customer = c.req.param('id'),
-    record = c.req.param('recordId');
-  if (!canWrite(s.role, 'exam')) return c.json({ error: '当前角色无权恢复报告附件' }, 403);
-  const existing = await c.env.DB.prepare(
-    'SELECT id FROM attachments WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>?',
-  )
-    .bind(record, customer, s.tenant_id, retentionCutoff())
-    .first();
-  if (!existing) return c.json({ error: '已删除附件不存在或超过恢复期限' }, 404);
-  const [restored] = await c.env.DB.batch([
-    c.env.DB.prepare(
-      `UPDATE attachments SET deleted_at=NULL WHERE id=? AND customer_id=? AND tenant_id=? AND deleted_at>datetime('now','-30 days')
-       AND EXISTS(SELECT 1 FROM customers c WHERE c.id=attachments.customer_id AND c.tenant_id=attachments.tenant_id AND c.deleted_at IS NULL) RETURNING id`,
-    ).bind(record, customer, s.tenant_id),
-    c.env.DB.prepare(
-      'INSERT INTO audit(id,tenant_id,actor,action,customer_id) SELECT ?,?,?,?,? WHERE changes()>0',
-    ).bind(id(), s.tenant_id, s.actor, '恢复报告附件', customer),
-  ]);
-  if (!restored.results.length)
-    return c.json({ error: '附件状态已变化或恢复期已过，请刷新后重试' }, 409);
-  return c.json({ ok: true });
-});
-app.get('/api/files/:id', async (c) => {
-  const r = await c.env.DB.prepare(
-    'SELECT a.* FROM attachments a JOIN customers c ON c.id=a.customer_id AND c.tenant_id=a.tenant_id AND c.deleted_at IS NULL WHERE a.id=? AND a.tenant_id=? AND a.deleted_at IS NULL',
-  )
-    .bind(c.req.param('id'), c.get('session').tenant_id)
-    .first<any>();
-  if (!r) return c.json({ error: '文件不存在' }, 404);
-  const obj = await c.env.FILES.get(r.object_key);
-  if (!obj) return c.json({ error: '文件不存在' }, 404);
-  return new Response(obj.body, {
-    headers: {
-      'Content-Type': r.mime,
-      'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(r.name)}`,
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
-});
+app.route('/api', attachmentRoutes);
 app.route('/api/export', exportRoutes);
 app.notFound((c) => c.json({ error: '接口不存在' }, 404));
 export default {

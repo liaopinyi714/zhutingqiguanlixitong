@@ -35,12 +35,14 @@ exportRoutes.get('/spreadsheet', async (c) => {
   const s = c.get('session');
   if (s.role !== '店主') return c.json({ error: '只有店主可以导出客户表格' }, 403);
   const tenant = s.tenant_id;
-  const [customers, exams, fittings, repairs, followups] = await c.env.DB.batch([
-    c.env.DB.prepare(
+  const kind = c.req.query('kind') || 'extended';
+  if (!['core', 'extended'].includes(kind)) return c.json({ error: '导出类型无效' }, 400);
+  const statements = {
+    customers: c.env.DB.prepare(
       `SELECT id,name,gender,birth_date,phone,contact,contact_phone,address,source,status,created_at
       FROM customers WHERE tenant_id=? AND deleted_at IS NULL ORDER BY name,id`,
     ).bind(tenant),
-    c.env.DB.prepare(
+    exams: c.env.DB.prepare(
       `WITH ranked AS (
       SELECT e.id,e.customer_id,e.date,e.data,
         ROW_NUMBER() OVER (PARTITION BY e.customer_id ORDER BY e.date DESC,e.created_at DESC,e.id DESC) AS rank
@@ -48,31 +50,36 @@ exportRoutes.get('/spreadsheet', async (c) => {
       WHERE e.tenant_id=? AND e.deleted_at IS NULL
     ) SELECT id,customer_id,date,data FROM ranked WHERE rank=1 ORDER BY customer_id`,
     ).bind(tenant),
-    c.env.DB.prepare(
+    fittings: c.env.DB.prepare(
       `SELECT f.id,f.customer_id,f.date,f.data FROM fittings f
       JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL
       WHERE f.tenant_id=? AND f.deleted_at IS NULL
       ORDER BY f.customer_id,f.date DESC,f.created_at DESC,f.id DESC`,
     ).bind(tenant),
-    c.env.DB.prepare(
+    repairs: c.env.DB.prepare(
       `SELECT r.id,r.customer_id,r.fitting_id,r.occurred_date,r.received_date,r.completed_date,
       r.status,r.problem,r.work_done,r.parts,r.price,r.warranty_covered FROM repairs r
       JOIN customers c ON c.id=r.customer_id AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
       JOIN fittings f ON f.id=r.fitting_id AND f.customer_id=r.customer_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
       WHERE r.tenant_id=? AND r.deleted_at IS NULL ORDER BY r.customer_id,r.occurred_date DESC,r.id DESC`,
     ).bind(tenant),
-    c.env.DB.prepare(
+    followups: c.env.DB.prepare(
       `SELECT u.id,u.customer_id,u.due,u.type,u.completed,u.completed_at,u.result
       FROM followups u JOIN customers c ON c.id=u.customer_id AND c.tenant_id=u.tenant_id AND c.deleted_at IS NULL
       WHERE u.tenant_id=? AND u.deleted_at IS NULL ORDER BY u.customer_id,u.due DESC,u.id DESC`,
     ).bind(tenant),
-  ]);
+  };
+  const selected = Object.entries(statements).filter(
+    ([table]) => kind === 'extended' || table === 'customers' || table === 'fittings',
+  );
+  const rows = await c.env.DB.batch(selected.map(([, statement]) => statement));
+  const data = Object.fromEntries(selected.map(([table], index) => [table, rows[index].results]));
   return c.json({
     exportedAt: new Date().toISOString(),
-    customers: customers.results,
-    exams: exams.results,
-    fittings: fittings.results,
-    repairs: repairs.results,
-    followups: followups.results,
+    customers: data.customers || [],
+    exams: data.exams || [],
+    fittings: data.fittings || [],
+    repairs: data.repairs || [],
+    followups: data.followups || [],
   });
 });

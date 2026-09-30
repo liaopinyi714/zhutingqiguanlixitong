@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { AuthError, isLocalDemo, readStaffAccounts, type AuthEnv, type Session } from './auth';
 import { validAvatar } from './avatar';
 import { retentionCutoff } from './retention';
+import { activeStoreWrite, auditAfterWrite, commitWrite, WriteConflictError } from './mutations';
 
 type Env = AuthEnv & { DB: D1Database };
 type Account = {
@@ -281,14 +282,16 @@ accountRoutes.put('/', async (c) => {
     .bind(d.email, s.tenant_id)
     .first();
   if (!member && !d.enabled) return c.json({ error: '该账户尚未加入当前门店' }, 404);
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
       `INSERT INTO store_memberships(email,tenant_id,name,enabled,source,left_at)
-       VALUES(?,?,?,?,'managed',NULL) ON CONFLICT(email,tenant_id) DO UPDATE SET
-       enabled=excluded.enabled,left_at=NULL,source='managed'`,
-    ).bind(d.email, s.tenant_id, account.name, d.enabled ? 1 : 0),
-    audit(c.env, s, `${d.enabled ? '添加或启用' : '停用'}门店成员：${d.email}`),
-  ]);
+       SELECT ?,?,?,?,'managed',NULL WHERE ${activeStoreWrite} ON CONFLICT(email,tenant_id) DO UPDATE SET
+       enabled=excluded.enabled,left_at=NULL,source='managed' RETURNING email AS id`,
+    ).bind(d.email, s.tenant_id, account.name, d.enabled ? 1 : 0, s.tenant_id, s.email),
+    `${d.enabled ? '添加或启用' : '停用'}门店成员：${d.email}`,
+  );
   return c.json({ ok: true });
 });
 
@@ -328,13 +331,15 @@ accountRoutes.post('/stores/:id/leave', async (c) => {
   const s = c.get('session');
   if (!s.tenant_id || c.req.param('id') !== s.tenant_id)
     return c.json({ error: '请先进入要退出的门店' }, 403);
-  await c.env.DB.batch([
+  const [left] = await c.env.DB.batch([
     c.env.DB.prepare(
-      'UPDATE store_memberships SET enabled=0,left_at=CURRENT_TIMESTAMP,last_seen_at=NULL WHERE email=? AND tenant_id=? AND enabled=1',
-    ).bind(s.email, s.tenant_id),
+      `UPDATE store_memberships SET enabled=0,left_at=CURRENT_TIMESTAMP,last_seen_at=NULL
+       WHERE email=? AND tenant_id=? AND enabled=1 AND ${activeStoreWrite} RETURNING email AS id`,
+    ).bind(s.email, s.tenant_id, s.tenant_id, s.email),
+    auditAfterWrite(c.env.DB, s, '退出门店'),
     markAbandoned(c.env, s.tenant_id, isLocalDemo(c.env, c.req.url)),
-    audit(c.env, s, '退出门店'),
   ]);
+  if (!left.results.length) throw new WriteConflictError();
   const remaining = await storesForAccount(c.env, s.email || '');
   const nextStoreId = remaining[0]?.id || '';
   selectCookie(c, nextStoreId);
@@ -392,12 +397,15 @@ accountRoutes.delete('/stores/:id', async (c) => {
   const parsed = storeSchema.safeParse(await c.req.json());
   if (!parsed.success || parsed.data.name !== s.storeName)
     return c.json({ error: '请输入完整门店名称确认删除' }, 400);
-  await c.env.DB.batch([
+  await commitWrite(
+    c.env.DB,
+    s,
     c.env.DB.prepare(
-      'UPDATE stores SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND deleted_at IS NULL',
-    ).bind(s.tenant_id),
-    audit(c.env, s, '删除门店'),
-  ]);
+      `UPDATE stores SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND name=? AND deleted_at IS NULL
+       AND ${activeStoreWrite} RETURNING id`,
+    ).bind(s.tenant_id, parsed.data.name, s.tenant_id, s.email),
+    '删除门店',
+  );
   const other = (await storesForAccount(c.env, s.email || ''))[0];
   selectCookie(c, other?.id || '');
   return c.json({ ok: true, nextStoreId: other?.id || '' });
@@ -448,13 +456,14 @@ accountRoutes.patch('/stores/:id', async (c) => {
     return c.json({ error: '请先切换到要修改的门店' }, 403);
   const parsed = storeSchema.safeParse(await c.req.json());
   if (!parsed.success) return c.json({ error: '请输入 1 至 80 字的门店名称' }, 400);
-  await c.env.DB.batch([
-    c.env.DB.prepare('UPDATE stores SET name=? WHERE id=? AND deleted_at IS NULL').bind(
-      parsed.data.name,
-      s.tenant_id,
-    ),
-    audit(c.env, s, `门店更名：${s.storeName} → ${parsed.data.name}`),
-  ]);
+  await commitWrite(
+    c.env.DB,
+    s,
+    c.env.DB.prepare(
+      `UPDATE stores SET name=? WHERE id=? AND deleted_at IS NULL AND ${activeStoreWrite} RETURNING id`,
+    ).bind(parsed.data.name, s.tenant_id, s.tenant_id, s.email),
+    `门店更名：${s.storeName} → ${parsed.data.name}`,
+  );
   return c.json({ ok: true, name: parsed.data.name });
 });
 

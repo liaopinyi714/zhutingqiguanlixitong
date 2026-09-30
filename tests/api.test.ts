@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { app } from '../server/index';
 import { purgeExpiredRecords } from '../server/retention';
 import { frequencies } from '../server/domain';
+import { makeSheets } from '../src/spreadsheetExport';
 let db: DatabaseSync, env: any, cookie: string;
 afterEach(() => db.close());
 function statement(sql: string, args: any[] = []): any {
@@ -33,6 +34,17 @@ async function switchToNewStore() {
   expect(switched.status).toBe(200);
   cookie = cookie.split(';')[0] + '; ' + switched.headers.get('Set-Cookie')!.split(';')[0];
 }
+// Simulate another committed request between this request's preflight reads
+// and its write transaction. No production database or identity is used.
+function beforeNextWrite(change: () => void) {
+  const batch = env.DB.batch;
+  env.DB.batch = async (statements: any[]) => {
+    env.DB.batch = batch;
+    change();
+    return batch(statements);
+  };
+}
+const auditCount = () => Number(db.prepare('SELECT COUNT(*) n FROM audit').get()!.n);
 beforeEach(async () => {
   db = new DatabaseSync(':memory:');
   db.exec(readFileSync('migrations/0001_schema.sql', 'utf8'));
@@ -78,6 +90,166 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it('核心 Excel 只读取客户和验配两项，表格仍与业务导出中的核心表相同', async () => {
+    const full = (await (await req('/export/spreadsheet')).json()) as any;
+    const sizes: number[] = [];
+    const batch = env.DB.batch;
+    env.DB.batch = async (statements: any[]) => {
+      sizes.push(statements.length);
+      return batch(statements);
+    };
+    const core = (await (await req('/export/spreadsheet?kind=core')).json()) as any;
+    expect(sizes).toEqual([2]);
+    expect(core.exams).toEqual([]);
+    expect(core.repairs).toEqual([]);
+    expect(core.followups).toEqual([]);
+    expect(makeSheets(core, 'core')).toEqual(makeSheets(full, 'core'));
+    expect((await req('/export/spreadsheet?kind=unknown')).status).toBe(400);
+  });
+  it.each([
+    ['/customers', 'store'],
+    ['/customers', 'membership'],
+    ['/intakes', 'store'],
+    ['/intakes', 'membership'],
+  ])('%s 写入时门店或成员已失效则不产生档案和审计（%s）', async (path, scope) => {
+    await req('/me');
+    const detail = (await (await req('/customers/demo-1')).json()) as any;
+    const before = auditCount();
+    const payload = { ...detail, name: '不可提交的虚构客户' };
+    beforeNextWrite(() =>
+      db.exec(
+        scope === 'store'
+          ? "UPDATE stores SET deleted_at=CURRENT_TIMESTAMP WHERE id='demo-store'"
+          : "UPDATE store_memberships SET enabled=0 WHERE email='owner@demo.invalid'",
+      ),
+    );
+    const response = await req(
+      path,
+      'POST',
+      path === '/intakes'
+        ? { customer: payload, followup: { due: '2026-10-01', type: '到店预约', note: '' } }
+        : payload,
+    );
+    expect(response.status).toBe(409);
+    expect(db.prepare('SELECT id FROM customers WHERE name=?').get(payload.name)).toBeUndefined();
+    expect(auditCount()).toBe(before);
+  });
+  it('客户在提交前被删除时不能再编辑其基本资料', async () => {
+    const profile = (await (await req('/customers/demo-1')).json()) as any;
+    const before = auditCount();
+    beforeNextWrite(() =>
+      db.exec("UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id='demo-1'"),
+    );
+    expect(
+      (await req('/customers/demo-1/profile', 'PUT', { ...profile, name: '不应覆盖' })).status,
+    ).toBe(409);
+    expect(db.prepare("SELECT name FROM customers WHERE id='demo-1'").get()!.name).toBe(
+      profile.name,
+    );
+    expect(auditCount()).toBe(before);
+  });
+  it.each(['exams', 'fittings', 'followups'])('客户在提交前被删除时不新增 %s', async (kind) => {
+    const detail = (await (await req('/customers/demo-1/detail')).json()) as any;
+    const before = auditCount();
+    const count = Number(db.prepare(`SELECT COUNT(*) n FROM ${kind}`).get()!.n);
+    const payload =
+      kind === 'followups' ? { due: '2026-10-01', type: '到店预约', note: '' } : detail[kind][0];
+    beforeNextWrite(() =>
+      db.exec("UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id='demo-1'"),
+    );
+    expect((await req('/customers/demo-1/' + kind, 'POST', payload)).status).toBe(409);
+    expect(Number(db.prepare(`SELECT COUNT(*) n FROM ${kind}`).get()!.n)).toBe(count);
+    expect(auditCount()).toBe(before);
+  });
+  it('关联验配设备在提交前被删除时不能创建维修记录', async () => {
+    const fitting = ((await (await req('/customers/demo-1/detail')).json()) as any).fittings[0];
+    const before = auditCount();
+    beforeNextWrite(() =>
+      db.prepare('UPDATE fittings SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(fitting.id),
+    );
+    const response = await req('/customers/demo-1/repairs', 'POST', {
+      fittingId: fitting.id,
+      occurredDate: '2026-10-01',
+      receivedDate: '',
+      completedDate: '',
+      status: '待送修',
+      problem: '',
+      findings: '',
+      workDone: '',
+      parts: '',
+      price: 0,
+      warrantyCovered: false,
+      notes: '',
+    });
+    expect(response.status).toBe(409);
+    expect(db.prepare('SELECT id FROM repairs WHERE fitting_id=?').get(fitting.id)).toBeUndefined();
+    expect(auditCount()).toBe(before);
+  });
+  it('重复删除的在途请求不能重设保留期或产生成功审计', async () => {
+    const record = ((await (await req('/customers/demo-1/detail')).json()) as any).exams[0];
+    const before = auditCount();
+    beforeNextWrite(() =>
+      db.prepare("UPDATE exams SET deleted_at='2000-01-01 00:00:00' WHERE id=?").run(record.id),
+    );
+    expect((await req(`/customers/demo-1/exams/${record.id}`, 'DELETE')).status).toBe(409);
+    expect(db.prepare('SELECT deleted_at FROM exams WHERE id=?').get(record.id)!.deleted_at).toBe(
+      '2000-01-01 00:00:00',
+    );
+    expect(auditCount()).toBe(before);
+  });
+  it('编辑期间别人完成随访，旧的空结果不能覆盖已完成记录', async () => {
+    const created = await req('/customers/demo-1/followups', 'POST', {
+      due: '2026-10-01',
+      type: '到店预约',
+      note: '',
+    });
+    const record = ((await created.json()) as any).id;
+    const before = auditCount();
+    beforeNextWrite(() =>
+      db
+        .prepare("UPDATE followups SET completed=1,result='另一位店主已联系' WHERE id=?")
+        .run(record),
+    );
+    expect(
+      (
+        await req(`/customers/demo-1/followups/${record}`, 'PUT', {
+          due: '2026-10-02',
+          type: '到店预约',
+          note: '',
+        })
+      ).status,
+    ).toBe(409);
+    expect(db.prepare('SELECT result FROM followups WHERE id=?').get(record)!.result).toBe(
+      '另一位店主已联系',
+    );
+    expect(auditCount()).toBe(before);
+  });
+  it('R2 上传期间客户被删除时拒绝写入目录并补偿删除文件', async () => {
+    await req('/me');
+    const before = auditCount();
+    const put = env.FILES.put;
+    let key = '';
+    env.FILES.put = async (objectKey: string, bytes: ArrayBuffer) => {
+      key = objectKey;
+      await put(objectKey, bytes);
+      db.exec("UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id='demo-1'");
+    };
+    const form = new FormData();
+    form.append('file', new File(['%PDF-1.4\nfictional'], 'race.pdf', { type: 'application/pdf' }));
+    const response = await app.request(
+      'http://localhost/api/customers/demo-1/attachments',
+      { method: 'POST', headers: { Cookie: cookie }, body: form },
+      env,
+    );
+    expect(response.status).toBe(409);
+    expect(await env.FILES.get(key)).toBeNull();
+    expect(db.prepare('SELECT id FROM attachments WHERE object_key=?').get(key)).toBeUndefined();
+    expect(auditCount()).toBe(before);
+  });
+  it.each([null, [], { result: 42 }])('无效 JSON 内容返回 400 而非服务器错误：%j', async (data) => {
+    expect((await req('/login', 'POST', data)).status).toBe(400);
+    expect((await req('/followups/not-a-record', 'PUT', data)).status).toBe(400);
+  });
   it('最后一位成员退出后门店进入保留期，账户独立登录并可恢复加入', async () => {
     const own = (await (await req('/me')).json()) as any;
     expect((await req('/accounts/stores/demo-store/leave', 'POST')).status).toBe(200);

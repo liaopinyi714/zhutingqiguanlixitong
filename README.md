@@ -2,6 +2,8 @@
 
 面向助听器门店的客户、听力、验配和售后档案网站。React + TypeScript 前端，Hono API，Cloudflare Workers Static Assets、D1 和私有 R2；正式登录使用 Cloudflare Access。代码在 GitHub，客户资料存于 D1/R2，不进入仓库。
 
+当前基线为 **第一长期版本 v1.0.0**，发布和维护约定见 [长期版本说明](docs/STABLE-V1.md)。
+
 ## 文档入口
 
 | 要做的事                                 | 文档                               |
@@ -17,6 +19,7 @@
 | 理解权限边界及现有安全限制               | [安全说明](docs/SECURITY.md)       |
 | 备份、恢复、业务资料迁移                 | [备份恢复](docs/BACKUP.md)         |
 | 查看本次收尾范围与验收                   | [更新记录](CHANGELOG.md)           |
+| 核对第一长期版本及兼容维护约定           | [长期版本](docs/STABLE-V1.md)      |
 
 文档以当前源码为准，加载优化核对日期为 **2026-10-01**。Cloudflare 的界面、额度和价格以各文档链接的官方说明及账户控制台为准。
 
@@ -76,9 +79,12 @@ src/useReadResource.ts 当前页、游标、重试及晚到结果控制
 src/useWorkspaceData.ts 页面资源与统计摘要
 src/RecordPicker.tsx   可检索和分页的客户/设备候选项
 src/ui.tsx             通用展示、统计和加载组件
+src/refreshAfterWrite.ts 保存成功与刷新失败的分离处理
 src/WorkspaceSkeletons.tsx 各业务页面的对应骨架
-server/index.ts        Worker 入口及客户/业务/附件路由
+server/index.ts        Worker 入口、客户业务路由和模块挂载
 server/http.ts         统一 HTTP 安全和权限边界
+server/mutations.ts    写入时范围校验、状态冲突和事务审计
+server/attachments.ts  私有报告上传、补偿、删除恢复与下载
 server/auth.ts         Access JWT 与提供者名单校验
 server/accounts.ts     独立账户与门店成员关系
 server/exports.ts      JSON/Excel 数据快照接口
@@ -94,7 +100,7 @@ docs/                  技术与运维文档
 
 ## 生产更新
 
-已有 GitHub → Workers Builds 配置的实例，在 `main` 更新后自动配置、检查、构建、应用未执行的正式迁移并发布。**Git 推送成功不等于生产部署成功**，应检查 Cloudflare Builds 的对应提交。此次加载优化新增 `0008_paged_read_indexes.sql`，现有构建会自动执行；无需新资源、新变量或重新建库。
+已有 GitHub → Workers Builds 配置的实例，在 `main` 更新后自动配置、检查、构建、应用未执行的正式迁移并发布。**Git 推送成功不等于生产部署成功**，应检查 Cloudflare Builds 的对应提交。第一长期版本包括正式迁移 0001–0008；构建会执行尚未应用的迁移。本次收尾未新增迁移、资源或变量，不需要重新建库。
 
 正式版要求 Access Allow 策略、正确 JWT 配置和运行时 `STAFF_ACCOUNTS` Secret。生产公网不接受 Demo 登录。首次操作使用 [网页部署步骤](docs/DEPLOYMENT-GUI.md)，账户和门店操作见 [运行维护](docs/OPERATIONS.md)。
 

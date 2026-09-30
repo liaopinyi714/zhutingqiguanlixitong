@@ -4,12 +4,14 @@ import { bodyLimit } from 'hono/body-limit';
 import { accessSession, AuthError, isLocalDemo } from './auth';
 import { resolveAccount } from './accounts';
 import type { AppContext } from './types';
+import { WriteConflictError } from './mutations';
 
 // Register before every route. Ordering is part of the authentication boundary.
 export function installHttpBoundary(app: Hono<AppContext>) {
   app.onError((err, c) => {
     if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
     if (err instanceof AuthError) return c.json({ error: err.message }, err.status);
+    if (err instanceof WriteConflictError) return c.json({ error: err.message }, 409);
     // Do not log query values, customer content, tokens or attachment names.
     console.error('request_failed', { path: c.req.routePath, kind: err.name });
     return c.json({ error: '服务暂时不可用，请稍后重试。' }, 500);

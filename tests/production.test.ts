@@ -120,6 +120,53 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  it.each(['invite', 'rename'])('写入前成员被停用时拒绝门店管理操作：%s', async (operation) => {
+    env.STAFF_ACCOUNTS = JSON.stringify([
+      owner,
+      { email: 'new-owner@example.com', name: '已开通同事', role: '店主' },
+    ]);
+    const jwt = await token();
+    await req('/me', jwt);
+    const batch = env.DB.batch;
+    env.DB.batch = async (statements: any[]) => {
+      env.DB.batch = batch;
+      db.prepare('UPDATE store_memberships SET enabled=0 WHERE email=? AND tenant_id=?').run(
+        owner.email,
+        owner.tenantId,
+      );
+      return batch(statements);
+    };
+    const response =
+      operation === 'invite'
+        ? await req('/accounts', jwt, 'PUT', { email: 'new-owner@example.com', enabled: true })
+        : await req('/accounts/stores/' + owner.tenantId, jwt, 'PATCH', { name: '不应更名' });
+    expect(response.status).toBe(409);
+    expect(db.prepare('SELECT name FROM stores WHERE id=?').get(owner.tenantId)!.name).toBe(
+      owner.storeName,
+    );
+    expect(
+      db.prepare('SELECT email FROM store_memberships WHERE email=?').get('new-owner@example.com'),
+    ).toBeUndefined();
+    expect(Number(db.prepare('SELECT COUNT(*) n FROM audit').get()!.n)).toBe(0);
+  });
+  it('门店在确认删除期间被更名时要求重新确认，不删除新名称的门店', async () => {
+    const jwt = await token();
+    await req('/me', jwt);
+    const batch = env.DB.batch;
+    env.DB.batch = async (statements: any[]) => {
+      env.DB.batch = batch;
+      db.prepare('UPDATE stores SET name=? WHERE id=?').run('同事已更新名称', owner.tenantId);
+      return batch(statements);
+    };
+    expect(
+      (await req('/accounts/stores/' + owner.tenantId, jwt, 'DELETE', { name: owner.storeName }))
+        .status,
+    ).toBe(409);
+    expect(
+      db.prepare('SELECT deleted_at FROM stores WHERE id=?').get(owner.tenantId)!.deleted_at,
+    ).toBeNull();
+    expect(Number(db.prepare('SELECT COUNT(*) n FROM audit').get()!.n)).toBe(0);
+  });
   it('多人初始门店配置使用有界批量语句，未超过 D1 Free 的查询限制', async () => {
     const roster = [
       owner,

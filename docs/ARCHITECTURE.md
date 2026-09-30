@@ -23,29 +23,32 @@ flowchart LR
 
 ## 2. 模块边界
 
-| 模块                                          | 责任                                         | 维护约束                           |
-| --------------------------------------------- | -------------------------------------------- | ---------------------------------- |
-| `shared/hearing.ts`                           | 历史频率、六个可编辑频率、空曲线、四频平均   | 纯函数，不依赖校验库、HTTP 或存储  |
-| `shared/calendar.ts`                          | 北京时间业务日期、年龄、日期差、UTC 时间解析 | 业务日期与数据库时间戳分开         |
-| `src/App.tsx`                                 | 壳、页组合、会话、数据集、编辑与跳转         | 独立图形和共用表单另有模块         |
-| `src/IntakePage.tsx`                          | 同页客户建档                                 | 勾选部分一次提交，不分批建档       |
-| `src/Audiogram.tsx` / `HearingEditor.tsx`     | 概览图与双耳交互图                           | 保留旧频率；新作图只操作六个频率   |
-| `src/RecordEditor.tsx` / `Fields.tsx`         | 业务编辑与表单字段                           | UI 约束不能替代服务端验证          |
-| `src/Accounts.tsx`                            | 账户、头像、门店、成员界面                   | 新登录账户只能后台提供             |
-| `src/ServiceDirectory.tsx`                    | 设备、维修、保修跨客户查询                   | 跳转携带客户/记录/设备 ID          |
-| `src/api.ts`                                  | 同源请求与当前标签页门店绑定                 | Cookie 仅是选择，不是授权          |
-| `src/readPlan.ts` / `useWorkspaceData.ts`     | 页面读取需求与聚合摘要                       | 不预读无关目录；保持门店范围       |
-| `src/useReadResource.ts` / `RecordPicker.tsx` | 当前页、位置游标、检索候选项与请求顺序       | 切店/退出后不得写回旧结果          |
-| `src/useWorkspaceRoute.ts` / `workspace.ts`   | Hash 路由与展示规则                          | 地址不包含客户姓名和搜索文本       |
-| `src/ui.tsx` / `WorkspaceSkeletons.tsx`       | 通用展示与对应页面骨架                       | 保留页面结构，仅替换未知数据       |
-| `server/http.ts`                              | 来源、认证、大小、门店范围与错误处理         | 必须在所有路由前注册               |
-| `server/auth.ts`                              | JWT 签名与提供者授权名单                     | 拒绝无配置、损坏配置和非店主身份   |
-| `server/accounts.ts`                          | 全局个人资料、门店成员状态、初始引导         | D1 资料和成员不能授予登录资格      |
-| `server/domain.ts`                            | Zod 输入验证                                 | 写入前验证；听力计算复用 shared    |
-| `server/index.ts`                             | 客户、业务、附件路由及 Worker 入口           | 所有读写限定已验证门店             |
-| `server/read-model.ts` / `pagination.ts`      | SQL 列表、筛选、游标与聚合                   | LIMIT 有上限；保留父记录隔离       |
-| `server/exports.ts`                           | JSON 与离线表格快照                          | 当前门店；Excel 排除软删除         |
-| `server/retention.ts`                         | 30 天保留与附件清理                          | 先删文件，成功后删目录；失败可重试 |
+| 模块                                          | 责任                                         | 维护约束                                           |
+| --------------------------------------------- | -------------------------------------------- | -------------------------------------------------- |
+| `shared/hearing.ts`                           | 历史频率、六个可编辑频率、空曲线、四频平均   | 纯函数，不依赖校验库、HTTP 或存储                  |
+| `shared/calendar.ts`                          | 北京时间业务日期、年龄、日期差、UTC 时间解析 | 业务日期与数据库时间戳分开                         |
+| `src/App.tsx`                                 | 壳、页组合、会话、数据集、编辑与跳转         | 独立图形和共用表单另有模块                         |
+| `src/IntakePage.tsx`                          | 同页客户建档                                 | 勾选部分一次提交，不分批建档                       |
+| `src/Audiogram.tsx` / `HearingEditor.tsx`     | 概览图与双耳交互图                           | 保留旧频率；新作图只操作六个频率                   |
+| `src/RecordEditor.tsx` / `Fields.tsx`         | 业务编辑与表单字段                           | UI 约束不能替代服务端验证                          |
+| `src/Accounts.tsx`                            | 账户、头像、门店、成员界面                   | 新登录账户只能后台提供                             |
+| `src/ServiceDirectory.tsx`                    | 设备、维修、保修跨客户查询                   | 跳转携带客户/记录/设备 ID                          |
+| `src/api.ts`                                  | 同源请求与当前标签页门店绑定                 | Cookie 仅是选择，不是授权                          |
+| `src/readPlan.ts` / `useWorkspaceData.ts`     | 页面读取需求与聚合摘要                       | 不预读无关目录；保持门店范围                       |
+| `src/useReadResource.ts` / `RecordPicker.tsx` | 当前页、位置游标、检索候选项与请求顺序       | 切店/退出后不得写回旧结果                          |
+| `src/useWorkspaceRoute.ts` / `workspace.ts`   | Hash 路由与展示规则                          | 地址不包含客户姓名和搜索文本                       |
+| `src/ui.tsx` / `WorkspaceSkeletons.tsx`       | 通用展示与对应页面骨架                       | 保留页面结构，仅替换未知数据                       |
+| `server/mutations.ts`                         | 写入时门店/成员/客户检查、状态冲突和事务审计 | SQL 必须带范围条件及 RETURNING，零变更不记成功审计 |
+| `server/attachments.ts`                       | 私有报告上传、补偿、删除恢复和下载           | 挂载在 HTTP 与有效客户中间件之后                   |
+| `src/refreshAfterWrite.ts`                    | 已确认保存后的读取失败处理                   | 不重发写入、不重新打开新增表单                     |
+| `server/http.ts`                              | 来源、认证、大小、门店范围与错误处理         | 必须在所有路由前注册                               |
+| `server/auth.ts`                              | JWT 签名与提供者授权名单                     | 拒绝无配置、损坏配置和非店主身份                   |
+| `server/accounts.ts`                          | 全局个人资料、门店成员状态、初始引导         | D1 资料和成员不能授予登录资格                      |
+| `server/domain.ts`                            | Zod 输入验证                                 | 写入前验证；听力计算复用 shared                    |
+| `server/index.ts`                             | 客户、业务、附件路由及 Worker 入口           | 所有读写限定已验证门店                             |
+| `server/read-model.ts` / `pagination.ts`      | SQL 列表、筛选、游标与聚合                   | LIMIT 有上限；保留父记录隔离                       |
+| `server/exports.ts`                           | JSON 与离线表格快照                          | 当前门店；Excel 排除软删除                         |
+| `server/retention.ts`                         | 30 天保留与附件清理                          | 先删文件，成功后删目录；失败可重试                 |
 
 浏览器只导入纯规则，**不加载服务端 Zod 校验模块**；服务器仍独立验证所有写入。环境绑定类型集中于 `server/types.ts`。
 
@@ -75,15 +78,15 @@ Hash 地址例如 `#page=customers&customer=<id>&tab=<标签>&record=<id>`，可
 
 静态标题、按钮、字段名和图轴先展示，未知内容显示骨架；骨架复用实际 CSS 与听力编辑器结构。失败区域提供重试，已就绪区域保持可用。`prefers-reduced-motion` 关闭扫光与出现动效。
 
-表单草稿只在页面内存中，离开有未保存提示；没有长期草稿或自动写入重试。当前没有请求幂等键和编辑版本比较，同一记录并发编辑可能由后保存的内容覆盖先保存的内容。
+表单草稿只在页面内存中，离开有未保存提示；没有长期草稿或自动写入重试。服务器确认保存后关闭表单，读取失败单独提示已保存；同客详情请求也按请求次序拒绝晚到的旧结果。当前没有请求幂等键和编辑版本比较，同一记录并发编辑可能由后保存的内容覆盖先保存的内容。
 
 ## 5. 数据与时间
 
-业务表均带 `tenant_id`，表示门店 ID，不是单位。报告原件独立存在 R2；关系与字段见 [数据模型](DATA-MODEL.md)。检查、验配采用受验证 JSON 快照，维修、随访采用字段。同页建档与审计使用 D1 `batch` 一次提交。
+业务表均带 `tenant_id`，表示门店 ID，不是单位。报告原件独立存在 R2；关系与字段见 [数据模型](DATA-MODEL.md)。检查、验配采用受验证 JSON 快照，维修、随访采用字段。同页建档与审计使用 D1 `batch` 一次提交。其他客户业务写入通过 mutations 模块统一执行，SQL 执行时再次验证成员、门店和有效客户，维修同时验证关联设备；未匹配则返回 409。审计紧随写入并以 changes()>0 为条件。D1 batch 的事务行为见 [官方说明](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)。
 
 生日、验配、保修、预约为无时区的 `YYYY-MM-DD`；“今天”统一按 `Asia/Shanghai`。D1 `CURRENT_TIMESTAMP` 为 UTC，界面转换为北京时间。恢复期限是实际经过的 30 × 24 小时；Cron 在北京时间 02:00。过期即拒绝恢复，物理清理可能因日调度、积压或失败晚于截止时刻。
 
-附件先写 R2，再写目录和审计；D1 失败尝试补偿删除对象。D1/R2 没有跨服务原子事务，补偿也可能失败。完整备份须停写、复制 SQL 和报告并核对，见 [备份恢复](BACKUP.md)。
+附件先写 R2，再写目录和审计；D1 失败或上传期间客户/门店资格变化时尝试补偿删除对象。D1/R2 没有跨服务原子事务，补偿也可能失败。完整备份须停写、复制 SQL 和报告并核对，见 [备份恢复](BACKUP.md)。
 
 ## 6. 样式和构建
 
