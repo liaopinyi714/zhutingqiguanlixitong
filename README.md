@@ -11,13 +11,14 @@
 | 阅读代码、理解加载与权限分层、迁移服务商 | [项目架构](docs/ARCHITECTURE.md)   |
 | 理解表、字段、关联、删除恢复             | [数据模型](docs/DATA-MODEL.md)     |
 | 查询现有接口和请求示例                   | [API 契约](docs/API.md)            |
+| 理解分页、按需加载、统计和索引成本       | [数据加载](docs/DATA-LOADING.md)   |
 | 接手开发、测试、修改迁移、发布           | [开发与维护](docs/DEVELOPMENT.md)  |
 | 开通账户、管理门店、排查线上故障         | [运行维护](docs/OPERATIONS.md)     |
 | 理解权限边界及现有安全限制               | [安全说明](docs/SECURITY.md)       |
 | 备份、恢复、业务资料迁移                 | [备份恢复](docs/BACKUP.md)         |
 | 查看本次收尾范围与验收                   | [更新记录](CHANGELOG.md)           |
 
-文档以当前源码为准，核对日期为 **2026-09-30**。Cloudflare 的界面、额度和价格以各文档链接的官方说明及账户控制台为准。
+文档以当前源码为准，加载优化核对日期为 **2026-10-01**。Cloudflare 的界面、额度和价格以各文档链接的官方说明及账户控制台为准。
 
 ## 当前功能
 
@@ -31,6 +32,7 @@
 - JSON 门店业务导出；完整 SQL/报告备份工具。
 - 独立账户、个人头像、自行创建/切换/更名/删除/退出门店、添加已有授权店主、成员启停与近似在线状态。
 - 当前页真实分区加载、对应业务布局的骨架、移动端适配和减少动态效果设置。
+- 客户/设备/维修/随访/保修/回收站游标分页；候选项按需搜索；D1 聚合统计。
 
 **登录账户只能由系统提供者开通。** 所有用户身份均为店主；网站不能注册或创建登录账户。账户可以不属于任何门店。姓名和头像仅本人可修改；同一门店的启用成员拥有相同的客户读写和门店管理权限。系统没有收费、订阅或“单位”层级，也没有账号密码登录。
 
@@ -69,6 +71,10 @@ src/RecordEditor.tsx    页内业务表单
 src/Accounts.tsx        个人资料、成员和门店管理
 src/ServiceDirectory.tsx 设备、维修和保修目录
 src/api.ts             每个浏览器标签页的请求门店绑定
+src/readPlan.ts        页面按需读取计划
+src/useReadResource.ts 当前页、游标、重试及晚到结果控制
+src/useWorkspaceData.ts 页面资源与统计摘要
+src/RecordPicker.tsx   可检索和分页的客户/设备候选项
 src/ui.tsx             通用展示、统计和加载组件
 src/WorkspaceSkeletons.tsx 各业务页面的对应骨架
 server/index.ts        Worker 入口及客户/业务/附件路由
@@ -76,6 +82,8 @@ server/http.ts         统一 HTTP 安全和权限边界
 server/auth.ts         Access JWT 与提供者名单校验
 server/accounts.ts     独立账户与门店成员关系
 server/exports.ts      JSON/Excel 数据快照接口
+server/read-model.ts   门店列表、客户详情入口和聚合统计
+server/pagination.ts   有界参数、位置游标与分页响应
 server/retention.ts    定时清理
 migrations/            演示迁移链
 migrations-production/ 正式迁移链
@@ -86,8 +94,8 @@ docs/                  技术与运维文档
 
 ## 生产更新
 
-已有 GitHub → Workers Builds 配置的实例，在 `main` 更新后自动配置、检查、构建、应用未执行的正式迁移并发布。**Git 推送成功不等于生产部署成功**，应检查 Cloudflare Builds 的对应提交。此次模块重构无需新资源、新变量或数据库迁移。
+已有 GitHub → Workers Builds 配置的实例，在 `main` 更新后自动配置、检查、构建、应用未执行的正式迁移并发布。**Git 推送成功不等于生产部署成功**，应检查 Cloudflare Builds 的对应提交。此次加载优化新增 `0008_paged_read_indexes.sql`，现有构建会自动执行；无需新资源、新变量或重新建库。
 
 正式版要求 Access Allow 策略、正确 JWT 配置和运行时 `STAFF_ACCOUNTS` Secret。生产公网不接受 Demo 登录。首次操作使用 [网页部署步骤](docs/DEPLOYMENT-GUI.md)，账户和门店操作见 [运行维护](docs/OPERATIONS.md)。
 
-当前列表及统计仍面向小型门店：部分数据按门店全量加载，没有服务端分页、写入冲突版本、自动备份或仪器导入。完整备份需要 SQL 与报告原件；Excel 和 JSON 下载均不能独立承担完整恢复。更换服务商可复用业务代码，但仍需适配数据库、对象存储和认证。听力图用于记录展示，不自动诊断或生成验配处方。
+日常列表按服务端游标读取，统计由 D1 聚合；包含词语的 LIKE 搜索和精确聚合仍有随数据量增加的扫描成本，见 [数据加载](docs/DATA-LOADING.md)。没有写入冲突版本、自动备份或仪器导入。完整备份需要 SQL 与报告原件；Excel 和 JSON 下载均不能独立承担完整恢复。更换服务商可复用业务代码，但仍需适配数据库、对象存储和认证。听力图用于记录展示，不自动诊断或生成验配处方。

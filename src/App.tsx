@@ -32,12 +32,11 @@ import {
   X,
 } from 'lucide-react';
 import { blankCurve } from '../shared/hearing';
-import { today, age, money, daysUntil, localTime, restoreDeadline } from './format';
+import { today, age, money, localTime, restoreDeadline } from './format';
 import { statuses, Badge, Empty, LoadingRows, Stat, Distribution } from './ui';
 import { Audiogram } from './Audiogram';
 import { IntakePage } from './IntakePage';
 import { HearingEditor } from './HearingEditor';
-import { RequestOrder } from './requestOrder';
 import { RecordEditor } from './RecordEditor';
 import { Accounts, AccountsSkeleton, AccountMenu } from './Accounts';
 import { AccountAvatar } from './AccountAvatar';
@@ -45,6 +44,8 @@ import { ServiceDirectory } from './ServiceDirectory';
 import { useWorkspaceRoute } from './useWorkspaceRoute';
 import { customerTabs, deviceName, deviceSerial } from './workspace';
 import { api } from './api';
+import { useWorkspaceData } from './useWorkspaceData';
+import { PageNavigation } from './PageNavigation';
 import {
   CustomerDetailSkeleton,
   CustomerPageSkeleton,
@@ -55,25 +56,12 @@ import {
 } from './WorkspaceSkeletons';
 
 import type { Customer, Exam, Follow, Detail } from './types';
-type Dataset = 'customers' | 'followups' | 'devices' | 'repairs' | 'removed';
-type LoadState = 'loading' | 'ready' | 'error';
-const initialDataState: Record<Dataset, LoadState> = {
-  customers: 'loading',
-  followups: 'loading',
-  devices: 'loading',
-  repairs: 'loading',
-  removed: 'loading',
-};
+type Dataset = 'customers' | 'followups' | 'removed' | 'stats' | 'recent';
 export default function App() {
   const [role, setRole] = useState(''),
     [boot, setBoot] = useState(true),
-    [customers, setCustomers] = useState<Customer[]>([]),
-    [removedCustomers, setRemovedCustomers] = useState<Customer[]>([]),
-    [devices, setDevices] = useState<any[]>([]),
-    [repairs, setRepairs] = useState<any[]>([]),
     [mobileMenu, setMobileMenu] = useState(false),
     [originPage, setOriginPage] = useState('customers'),
-    [followups, setFollowups] = useState<Follow[]>([]),
     [detail, setDetail] = useState<Detail | null>(null),
     [detailError, setDetailError] = useState(false),
     [removed, setRemoved] = useState<{
@@ -126,7 +114,6 @@ export default function App() {
       }
     }),
     [sidebarHover, setSidebarHover] = useState(false),
-    [dataState, setDataState] = useState<Record<Dataset, LoadState>>(initialDataState),
     [identity, setIdentity] = useState({
       demo: false,
       name: '',
@@ -140,7 +127,6 @@ export default function App() {
   const accountDirty = useRef(false);
   const accountBusy = useRef(false);
   const dataSession = useRef(0);
-  const requestOrder = useRef(new RequestOrder());
   const draftSnapshot = useRef('');
   const { route, update: updateRoute } = useWorkspaceRoute(() => {
     if (!canLeaveEditor()) return false;
@@ -150,6 +136,29 @@ export default function App() {
     return true;
   });
   const { page, customer: selected, tab, record: focusedRecord, device: repairDevice } = route;
+  const {
+    customer,
+    customers,
+    followups,
+    removedCustomers,
+    stats,
+    recent,
+    customerList,
+    tasks,
+    removed: removedList,
+    dataState,
+    loadDataset,
+    refresh,
+  } = useWorkspaceData({
+    page,
+    selected,
+    role,
+    tenant: identity.tenant_id,
+    filter,
+    search,
+    taskFilter,
+    searchOpen,
+  });
   const selectedCustomerRef = useRef(selected);
   selectedCustomerRef.current = selected;
   const setPage = (page: string) => updateRoute({ page });
@@ -240,81 +249,10 @@ export default function App() {
     setSearchMounted(true);
     setSearchOpen(true);
   }
-  const customer = customers.find((c) => c.id === selected),
-    pending = followups.filter((f) => !f.completed),
-    overdue = pending.filter((f) => f.due < today()),
-    todayTasks = pending.filter((f) => f.due === today()),
-    fitted = customers.filter((c) => ['已验配', '长期随访'].includes(c.status)),
-    warrantyAlerts = devices
-      .filter((item) => item.warranty && daysUntil(item.warranty) <= 90)
-      .sort((a, b) => a.warranty.localeCompare(b.warranty));
   const flash = (msg: string) => {
     setToast(msg);
     setTimeout(() => setToast(''), 3500);
   };
-  async function refresh(includeRemoved = role === '店主') {
-    const session = dataSession.current;
-    const keys: Dataset[] = ['customers', 'followups', 'devices', 'repairs', 'removed'];
-    const guards = Object.fromEntries(keys.map((key) => [key, requestOrder.current.begin(key)]));
-    const [a, b, warrantyRows, removedRows, repairRows] = await Promise.all([
-      api('/customers'),
-      api('/followups'),
-      api('/devices'),
-      includeRemoved ? api('/customers/removed') : Promise.resolve([]),
-      api('/repairs'),
-    ]).catch((error) => {
-      if (session === dataSession.current)
-        setDataState((current) => {
-          const next = { ...current };
-          for (const key of keys) if (guards[key]()) next[key] = 'error';
-          return next;
-        });
-      throw error;
-    });
-    if (session !== dataSession.current) return;
-    if (guards.customers()) setCustomers(a);
-    if (guards.followups()) setFollowups(b);
-    if (guards.devices()) setDevices(warrantyRows);
-    if (guards.repairs()) setRepairs(repairRows);
-    if (guards.removed()) setRemovedCustomers(removedRows);
-    setDataState((current) => {
-      const next = { ...current };
-      for (const key of keys) if (guards[key]()) next[key] = 'ready';
-      return next;
-    });
-  }
-  function loadDataset(key: Dataset, session = dataSession.current) {
-    const isLatest = requestOrder.current.begin(key);
-    const paths: Record<Dataset, string> = {
-      customers: '/customers',
-      followups: '/followups',
-      devices: '/devices',
-      repairs: '/repairs',
-      removed: '/customers/removed',
-    };
-    setDataState((current) => ({ ...current, [key]: 'loading' }));
-    api(paths[key])
-      .then((rows) => {
-        if (session !== dataSession.current || !isLatest()) return;
-        if (key === 'customers') setCustomers(rows);
-        if (key === 'followups') setFollowups(rows);
-        if (key === 'devices') setDevices(rows);
-        if (key === 'repairs') setRepairs(rows);
-        if (key === 'removed') setRemovedCustomers(rows);
-        setDataState((current) => ({ ...current, [key]: 'ready' }));
-      })
-      .catch(() => {
-        if (session === dataSession.current && isLatest())
-          setDataState((current) => ({ ...current, [key]: 'error' }));
-      });
-  }
-  function loadInitialData() {
-    const session = ++dataSession.current;
-    setDataState(initialDataState);
-    (['customers', 'followups', 'devices', 'repairs', 'removed'] as Dataset[]).forEach((key) =>
-      loadDataset(key, session),
-    );
-  }
   function dataFallback(keys: Dataset[], lines = 3, placeholder?: ReactNode) {
     const failed = keys.filter((key) => dataState[key] === 'error');
     if (failed.length)
@@ -324,7 +262,7 @@ export default function App() {
           <button
             type="button"
             className="button small"
-            onClick={() => failed.forEach((key) => loadDataset(key))}
+            onClick={() => failed.forEach((key) => void loadDataset(key).catch(() => {}))}
           >
             重试
           </button>
@@ -363,7 +301,6 @@ export default function App() {
         const r = identityResult.value;
         setIdentity(r);
         setRole(r.role);
-        if (r.tenant_id) loadInitialData();
       } else if (!demo) {
         setError((identityResult.reason as Error).message);
       }
@@ -555,13 +492,7 @@ export default function App() {
       if (result.logoutUrl) window.location.assign(result.logoutUrl);
       else {
         dataSession.current += 1;
-        setCustomers([]);
-        setFollowups([]);
-        setDevices([]);
-        setRepairs([]);
-        setRemovedCustomers([]);
         setDetail(null);
-        setDataState(initialDataState);
         setRole('');
         setSelected(null);
         setEditorKind('');
@@ -682,7 +613,8 @@ export default function App() {
               due: today(),
               type: '适应回访',
               note: '',
-              customerId: selected || customers[0]?.id || '',
+              customerId: selected || '',
+              name: customer?.name || '',
             },
       );
     if (kind === 'complete') setDraft({ ...record, result: '' });
@@ -756,7 +688,7 @@ export default function App() {
     try {
       await api(`/customers/${recordId}${restore ? '/restore' : ''}`, restore ? 'POST' : 'DELETE');
       if (!restore && selected === recordId) setSelected(null);
-      await refresh();
+      await refresh(!restore && selected === recordId);
       flash(restore ? '客户档案已恢复' : '客户档案已删除，30 天内可恢复');
     } catch (reason) {
       setError((reason as Error).message);
@@ -936,11 +868,7 @@ export default function App() {
       setExcelBusy('');
     }
   }
-  const filtered = customers.filter(
-    (c) =>
-      (filter === '全部客户' || c.status === filter) &&
-      [c.name, c.phone, c.id].some((v) => v.toLowerCase().includes(search.toLowerCase())),
-  );
+  const filtered = customers;
   if (!role && !boot)
     return (
       <div className="cf-login">
@@ -982,7 +910,6 @@ export default function App() {
                   const me = await api('/me');
                   setIdentity(me);
                   setRole('店主');
-                  if (me.tenant_id) loadInitialData();
                 } catch (e) {
                   setError((e as Error).message);
                 } finally {
@@ -1058,6 +985,7 @@ export default function App() {
   const editor =
     editorKind && editorKind !== 'exam' ? (
       <RecordEditor
+        scope={identity.tenant_id}
         kind={editorKind}
         draft={draft}
         customers={customers}
@@ -1376,7 +1304,7 @@ export default function App() {
                 >
                   <Icon size={18} strokeWidth={1.5} />
                   <span>{label}</span>
-                  {key === 'followups' && pending.length > 0 && <b>{pending.length}</b>}
+                  {key === 'followups' && stats.pending > 0 && <b>{stats.pending}</b>}
                 </button>
               ))}
           </nav>
@@ -1511,7 +1439,7 @@ export default function App() {
               onClick={() => navigate('followups')}
             >
               <Bell size={19} />
-              {todayTasks.length > 0 && <i className="notification-dot" />}
+              {stats.today > 0 && <i className="notification-dot" />}
             </button>
             <button
               className="top-avatar"
@@ -1538,7 +1466,7 @@ export default function App() {
                 onClick={() =>
                   (Object.keys(dataState) as Dataset[])
                     .filter((key) => dataState[key] === 'error')
-                    .forEach((key) => loadDataset(key))
+                    .forEach((key) => void loadDataset(key).catch(() => {}))
                 }
               >
                 重试加载
@@ -1609,6 +1537,9 @@ export default function App() {
                   ) : (
                     <p className="muted">没有已删除的客户档案</p>
                   )}
+                  <div className="table-footer">
+                    <PageNavigation resource={removedList} />
+                  </div>
                 </section>
               )}
             </>
@@ -1617,16 +1548,17 @@ export default function App() {
             <ServiceDirectory
               key={page}
               kind={page as 'devices' | 'repairs' | 'warranties'}
-              devices={devices}
-              repairs={repairs}
-              customers={customers}
-              canEdit={role === '店主' || boot}
-              loading={!dataReady(page === 'repairs' ? 'repairs' : 'devices')}
-              loadError={
-                dataState[page === 'repairs' ? 'repairs' : 'devices'] === 'error'
-                  ? dataFallback([page === 'repairs' ? 'repairs' : 'devices'])
+              scope={identity.tenant_id}
+              customerCount={stats.customers}
+              deviceCount={stats.devices}
+              total={
+                dataReady('stats')
+                  ? page === 'repairs'
+                    ? stats.repairs
+                    : stats.devices
                   : undefined
               }
+              canEdit={role === '店主' || boot}
               open={openCustomer}
               create={(kind, customerId, deviceId) => {
                 openCustomer(customerId, kind === 'repair' ? '维修记录' : '验配记录');
@@ -1658,8 +1590,8 @@ export default function App() {
                       weekday: 'long',
                     })}{' '}
                     <span className="dot-sep">·</span> 今日有{' '}
-                    {dataReady('followups') ? (
-                      todayTasks.length
+                    {dataReady('stats') ? (
+                      stats.today
                     ) : (
                       <span className="skeleton-line skeleton-inline-count" />
                     )}{' '}
@@ -1698,8 +1630,8 @@ export default function App() {
                   <header>
                     <span>最近建档</span>
                   </header>
-                  {dataReady('customers')
-                    ? customers.slice(0, 3).map((recent) => (
+                  {dataReady('recent')
+                    ? recent.items.slice(0, 3).map((recent) => (
                         <button key={recent.id} onClick={() => openCustomer(recent.id)}>
                           <Clock3 size={16} />
                           {recent.name}
@@ -1707,7 +1639,7 @@ export default function App() {
                           <ChevronRight size={16} />
                         </button>
                       ))
-                    : dataFallback(['customers'], 3, <RecentCustomersSkeleton />)}
+                    : dataFallback(['recent'], 3, <RecentCustomersSkeleton />)}
                 </section>
               </div>
               <div className="home-section-label">
@@ -1717,20 +1649,20 @@ export default function App() {
                 <Stat
                   onClick={() => navigate('customers')}
                   label="客户总数"
-                  value={customers.length}
+                  value={stats.customers}
                   unit="位"
                   detail=""
                   icon={<Users />}
-                  loading={!dataReady('customers')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => navigate('devices')}
                   label="已验配客户"
-                  value={fitted.length}
+                  value={stats.fitted}
                   unit="位"
                   detail=""
                   icon={<Headphones />}
-                  loading={!dataReady('customers')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => {
@@ -1738,11 +1670,11 @@ export default function App() {
                     setTaskFilter('今日');
                   }}
                   label="今日待办"
-                  value={todayTasks.length}
+                  value={stats.today}
                   unit="项"
                   detail=""
                   icon={<CalendarDays />}
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => {
@@ -1750,12 +1682,12 @@ export default function App() {
                     setTaskFilter('已逾期');
                   }}
                   label="逾期未跟进"
-                  value={overdue.length}
+                  value={stats.overdue}
                   unit="项"
                   detail=""
                   icon={<Bell />}
                   warning
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
               </div>
               <div className="dashboard-columns">
@@ -1764,7 +1696,7 @@ export default function App() {
                     <div>
                       <h2>
                         服务待办{' '}
-                        {dataReady('followups') && <span className="count">{pending.length}</span>}
+                        {dataReady('stats') && <span className="count">{stats.pending}</span>}
                       </h2>
                     </div>
                     <button className="text-link muted" onClick={() => navigate('followups')}>
@@ -1772,7 +1704,7 @@ export default function App() {
                     </button>
                   </div>
                   {dataReady('followups') ? (
-                    taskRows([...pending].sort((a, b) => a.due.localeCompare(b.due)).slice(0, 4))
+                    taskRows(followups)
                   ) : dataState.followups === 'error' ? (
                     dataFallback(['followups'])
                   ) : (
@@ -1782,10 +1714,10 @@ export default function App() {
                 <div className="dashboard-side">
                   <section className="panel journey-panel">
                     <h2>服务阶段</h2>
-                    {dataReady('customers') ? (
+                    {dataReady('stats') ? (
                       <div className="journey-bars">
                         {statuses.slice(1).map((s, i) => {
-                          const count = customers.filter((c) => c.status === s).length;
+                          const count = stats.status[s] || 0;
                           return (
                             <button
                               key={s}
@@ -1809,7 +1741,7 @@ export default function App() {
                               <div className="bar-track">
                                 <i
                                   style={{
-                                    width: (100 * count) / Math.max(customers.length, 1) + '%',
+                                    width: (100 * count) / Math.max(stats.customers, 1) + '%',
                                     background: ['#b8bdc5', '#7a9cca', '#5285c0', '#215eab'][i],
                                   }}
                                 />
@@ -1818,8 +1750,8 @@ export default function App() {
                           );
                         })}
                       </div>
-                    ) : dataState.customers === 'error' ? (
-                      dataFallback(['customers'])
+                    ) : dataState.stats === 'error' ? (
+                      dataFallback(['stats'])
                     ) : (
                       <JourneySkeleton />
                     )}
@@ -1835,10 +1767,10 @@ export default function App() {
                     全部客户 <ArrowRight size={15} />
                   </button>
                 </div>
-                {dataReady('customers')
-                  ? customerTable(customers.slice(0, 4), true)
-                  : dataState.customers === 'error'
-                    ? dataFallback(['customers'])
+                {dataReady('recent')
+                  ? customerTable(recent.items.slice(0, 4), true)
+                  : dataState.recent === 'error'
+                    ? dataFallback(['recent'])
                     : customerTable([], true, true)}
               </section>
             </>
@@ -1875,11 +1807,11 @@ export default function App() {
                       >
                         {s}
                         <span>
-                          {!dataReady('customers')
+                          {!dataReady('stats')
                             ? '…'
                             : s === '全部客户'
-                              ? customers.length
-                              : customers.filter((c) => c.status === s).length}
+                              ? stats.customers
+                              : stats.status[s] || 0}
                         </span>
                       </button>
                     ))}
@@ -1900,11 +1832,16 @@ export default function App() {
                     : customerTable([], false, true)}
                 <div className="table-footer">
                   {dataReady('customers') ? (
-                    `共 ${filtered.length} 位客户`
+                    search.trim() || !dataReady('stats') ? (
+                      `本页 ${filtered.length} 位匹配客户`
+                    ) : (
+                      `共 ${filter === '全部客户' ? stats.customers : stats.status[filter] || 0} 位客户`
+                    )
                   ) : (
                     <span className="skeleton-line skeleton-task-date" />
                   )}{' '}
                   <span>点击客户查看完整服务档案</span>
+                  <PageNavigation resource={customerList} />
                 </div>
               </section>
             </>
@@ -2751,7 +2688,7 @@ export default function App() {
                 </div>
                 <button
                   className="button primary"
-                  disabled={!customers.length}
+                  disabled={!stats.customers}
                   onClick={() => openForm('followup')}
                 >
                   <Plus size={17} />
@@ -2766,11 +2703,11 @@ export default function App() {
                     setTaskFilter('待完成');
                   }}
                   label="待完成"
-                  value={pending.length}
+                  value={stats.pending}
                   unit="项"
                   detail=""
                   icon={<ClipboardList />}
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => {
@@ -2778,11 +2715,11 @@ export default function App() {
                     setTaskFilter('今日');
                   }}
                   label="今日到期"
-                  value={todayTasks.length}
+                  value={stats.today}
                   unit="项"
                   detail=""
                   icon={<CalendarDays />}
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => {
@@ -2790,11 +2727,11 @@ export default function App() {
                     setTaskFilter('已完成');
                   }}
                   label="已完成"
-                  value={followups.length - pending.length}
+                  value={stats.completed}
                   unit="项"
                   detail=""
                   icon={<CheckCircle2 />}
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
               </div>
               <section className="panel">
@@ -2812,24 +2749,15 @@ export default function App() {
                   </div>
                 </div>
                 {dataReady('followups') ? (
-                  taskRows(
-                    followups.filter(
-                      (f) =>
-                        taskFilter === '全部' ||
-                        (taskFilter === '今日'
-                          ? !f.completed && f.due === today()
-                          : taskFilter === '已完成'
-                            ? !!f.completed
-                            : taskFilter === '已逾期'
-                              ? !f.completed && f.due < today()
-                              : !f.completed),
-                    ),
-                  )
+                  taskRows(followups)
                 ) : dataState.followups === 'error' ? (
                   dataFallback(['followups'])
                 ) : (
                   <TaskListSkeleton lines={5} />
                 )}
+                <div className="table-footer">
+                  <PageNavigation resource={tasks} />
+                </div>
               </section>
             </>
           )}
@@ -2878,22 +2806,20 @@ export default function App() {
                 <Stat
                   onClick={() => navigate('customers')}
                   label="客户总数"
-                  value={customers.length}
+                  value={stats.customers}
                   unit="位"
                   detail=""
                   icon={<Users />}
-                  loading={!dataReady('customers')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => navigate('devices')}
                   label="已验配占比"
-                  value={
-                    customers.length ? Math.round((fitted.length / customers.length) * 100) : 0
-                  }
+                  value={stats.customers ? Math.round((stats.fitted / stats.customers) * 100) : 0}
                   unit="%"
                   detail="已验配及长期随访 / 全部客户"
                   icon={<Headphones />}
-                  loading={!dataReady('customers')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => {
@@ -2902,31 +2828,31 @@ export default function App() {
                   }}
                   label="随访完成率"
                   value={
-                    followups.length
-                      ? Math.round(((followups.length - pending.length) / followups.length) * 100)
+                    stats.pending + stats.completed
+                      ? Math.round((stats.completed / (stats.pending + stats.completed)) * 100)
                       : 0
                   }
                   unit="%"
                   detail="已完成 / 全部随访任务"
                   icon={<CheckCircle2 />}
-                  loading={!dataReady('followups')}
+                  loading={!dataReady('stats')}
                 />
                 <Stat
                   onClick={() => navigate('warranties')}
                   label="保修需关注"
-                  value={warrantyAlerts.length}
+                  value={stats.warrantyAlerts}
                   unit="项"
                   detail="已过期或 90 天内到期"
                   icon={<Bell />}
                   warning
-                  loading={!dataReady('devices')}
+                  loading={!dataReady('stats')}
                 />
               </div>
               <button className="section-shortcut panel" onClick={() => navigate('warranties')}>
                 <Shield size={19} />
                 <span>查看保修到期设备</span>
-                {dataReady('devices') ? (
-                  <span className="count">{warrantyAlerts.length}</span>
+                {dataReady('stats') ? (
+                  <span className="count">{stats.warrantyAlerts}</span>
                 ) : (
                   <span className="skeleton-line skeleton-count" />
                 )}
@@ -2937,13 +2863,11 @@ export default function App() {
                   <Distribution
                     title="客户来源"
                     subtitle=""
-                    loading={!dataReady('customers')}
-                    loadError={
-                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
-                    }
-                    data={[...new Set(customers.map((c) => c.source))].map((s) => ({
-                      label: s || '未填写',
-                      count: customers.filter((c) => c.source === s).length,
+                    loading={!dataReady('stats')}
+                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
+                    data={Object.entries(stats.sources || {}).map(([label, count]) => ({
+                      label,
+                      count,
                     }))}
                   />
                 }
@@ -2951,49 +2875,22 @@ export default function App() {
                   <Distribution
                     title="客户年龄分布"
                     subtitle="按当前日期与出生日期计算"
-                    loading={!dataReady('customers')}
-                    loadError={
-                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
-                    }
-                    data={[
-                      {
-                        label: '40 岁以下',
-                        count: customers.filter((c) => age(c.birthDate) < 40).length,
-                      },
-                      {
-                        label: '40–59 岁',
-                        count: customers.filter(
-                          (c) => age(c.birthDate) >= 40 && age(c.birthDate) < 60,
-                        ).length,
-                      },
-                      {
-                        label: '60–79 岁',
-                        count: customers.filter(
-                          (c) => age(c.birthDate) >= 60 && age(c.birthDate) < 80,
-                        ).length,
-                      },
-                      {
-                        label: '80 岁及以上',
-                        count: customers.filter((c) => age(c.birthDate) >= 80).length,
-                      },
-                      {
-                        label: '未填写',
-                        count: customers.filter((c) => !Number.isFinite(age(c.birthDate))).length,
-                      },
-                    ]}
+                    loading={!dataReady('stats')}
+                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
+                    data={['40 岁以下', '40–59 岁', '60–79 岁', '80 岁及以上', '未填写'].map(
+                      (label) => ({ label, count: stats.ages?.[label] || 0 }),
+                    )}
                   />
                 }
                 {
                   <Distribution
                     title="服务阶段"
                     subtitle="每位客户只计入当前阶段"
-                    loading={!dataReady('customers')}
-                    loadError={
-                      dataState.customers === 'error' ? dataFallback(['customers']) : undefined
-                    }
+                    loading={!dataReady('stats')}
+                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
                     data={statuses.slice(1).map((s) => ({
                       label: s,
-                      count: customers.filter((c) => c.status === s).length,
+                      count: stats.status[s] || 0,
                     }))}
                   />
                 }
@@ -3001,13 +2898,11 @@ export default function App() {
                   <Distribution
                     title="随访服务类型"
                     subtitle="包含待完成与已完成任务"
-                    loading={!dataReady('followups')}
-                    loadError={
-                      dataState.followups === 'error' ? dataFallback(['followups']) : undefined
-                    }
+                    loading={!dataReady('stats')}
+                    loadError={dataState.stats === 'error' ? dataFallback(['stats']) : undefined}
                     data={['适应回访', '听力复查', '清洁保养', '维修跟进', '到店预约'].map((s) => ({
                       label: s,
-                      count: followups.filter((f) => f.type === s).length,
+                      count: stats.types?.[s] || 0,
                     }))}
                   />
                 }
@@ -3160,7 +3055,7 @@ export default function App() {
                   setSearchActive(0);
                 }}
                 onKeyDown={(e) => {
-                  const rows = globalQuery.trim() ? globalResults : customers.slice(0, 6);
+                  const rows = globalQuery.trim() ? globalResults : recent.items;
                   if (e.key === 'ArrowDown') {
                     e.preventDefault();
                     setSearchActive((n) => (n + 1) % Math.max(rows.length, 1));
@@ -3199,27 +3094,27 @@ export default function App() {
                         : `搜索结果 · ${globalResults.length} 位客户`
                     : '最近建档的客户'}
                 </div>
-                {(globalQuery.trim() ? globalResults : customers.slice(0, 6)).map(
-                  (entry, index) => (
-                    <button
-                      className={searchActive === index ? 'active' : ''}
-                      key={entry.id}
-                      onMouseEnter={() => setSearchActive(index)}
-                      onClick={() => openCustomer(entry.id)}
-                    >
-                      <ContactRound className="search-result-icon" size={19} strokeWidth={1.5} />
-                      <span className="search-result-content">
-                        <strong>{entry.name}</strong>
-                        <small>
-                          <span aria-hidden="true">—</span> {entry.phone || entry.status}
-                        </small>
-                      </span>
-                      <span className="search-result-meta">
-                        <ArrowRight size={18} />
-                      </span>
-                    </button>
-                  ),
-                )}
+                {!globalQuery.trim() && recent.loading && <LoadingRows lines={3} />}
+                {!globalQuery.trim() && recent.error && dataFallback(['recent'])}
+                {(globalQuery.trim() ? globalResults : recent.items).map((entry, index) => (
+                  <button
+                    className={searchActive === index ? 'active' : ''}
+                    key={entry.id}
+                    onMouseEnter={() => setSearchActive(index)}
+                    onClick={() => openCustomer(entry.id)}
+                  >
+                    <ContactRound className="search-result-icon" size={19} strokeWidth={1.5} />
+                    <span className="search-result-content">
+                      <strong>{entry.name}</strong>
+                      <small>
+                        <span aria-hidden="true">—</span> {entry.phone || entry.status}
+                      </small>
+                    </span>
+                    <span className="search-result-meta">
+                      <ArrowRight size={18} />
+                    </span>
+                  </button>
+                ))}
                 {!searchBusy && !searchError && globalQuery.trim() && !globalResults.length && (
                   <div className="search-no-results">
                     没有找到相关客户。请尝试姓名、电话、设备型号或服务记录中的词语。

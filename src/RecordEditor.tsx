@@ -5,7 +5,10 @@ import { deviceSerial } from './workspace';
 import type { Customer, Detail } from './types';
 import { today } from './format';
 import { statuses } from './ui';
+import { RecordPicker } from './RecordPicker';
+import { useDebounced, useReadResource } from './useReadResource';
 type Props = {
+  scope: string;
   kind: string;
   draft: any;
   customers: Customer[];
@@ -17,6 +20,7 @@ type Props = {
   closeEditor: () => void;
 };
 export function RecordEditor({
+  scope,
   kind: editorKind,
   draft,
   customers,
@@ -28,6 +32,21 @@ export function RecordEditor({
   closeEditor,
 }: Props) {
   const ref = useRef<HTMLElement>(null);
+  const duplicateQuery = useDebounced(
+    JSON.stringify([draft.name || '', draft.birthDate || '', draft.id || '']),
+  );
+  const [name, birthDate, exclude] = JSON.parse(duplicateQuery);
+  const duplicates = useReadResource<any[]>(
+    scope && editorKind === 'customer' && name.trim()
+      ? '/customers/duplicates?name=' +
+          encodeURIComponent(name.trim()) +
+          '&birthDate=' +
+          encodeURIComponent(birthDate) +
+          '&exclude=' +
+          encodeURIComponent(exclude)
+      : null,
+    scope,
+  );
   useEffect(() => {
     ref.current?.scrollIntoView({
       block: 'start',
@@ -63,17 +82,11 @@ export function RecordEditor({
       <form onSubmit={submit}>
         <div className="record-editor-body">
           {error && <div className="error">{error}</div>}
-          {editorKind === 'customer' &&
-            customers.some(
-              (c) =>
-                c.id !== draft.id &&
-                c.name === draft.name.trim() &&
-                c.birthDate === draft.birthDate,
-            ) && (
-              <div className="duplicate-notice">
-                已有同名、同出生日期的客户。请先核对是否重复建档；如确为不同客户，可以继续保存。
-              </div>
-            )}
+          {editorKind === 'customer' && !!duplicates.data?.length && (
+            <div className="duplicate-notice">
+              已有同名、同出生日期的客户。请先核对是否重复建档；如确为不同客户，可以继续保存。
+            </div>
+          )}
           {editorKind === 'customer' && (
             <div className="form-grid">
               <Field label="客户姓名 *">
@@ -303,18 +316,15 @@ export function RecordEditor({
           {editorKind === 'followup' && (
             <div className="form-grid">
               <Field label="客户 *" wide>
-                <select
-                  required
+                <RecordPicker
+                  scope={scope}
                   value={draft.customerId}
                   disabled={!!draft.id}
-                  onChange={(e) => change('customerId', e.target.value)}
-                >
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name} · {c.status}
-                    </option>
-                  ))}
-                </select>
+                  selectedLabel={
+                    draft.name || customers.find((c) => c.id === draft.customerId)?.name || ''
+                  }
+                  onChange={(id) => change('customerId', id)}
+                />
               </Field>
               <Field label="计划日期 *">
                 <input

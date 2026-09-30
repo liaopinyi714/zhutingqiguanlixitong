@@ -2,7 +2,7 @@
 
 如果你希望只通过 Cloudflare 与 GitHub 网页完成首次部署，请改用 [网页操作指南](DEPLOYMENT-GUI.md)。本文保留本机命令行及 GitHub Actions 的部署方式。
 
-核对日期：2026-09-30。适用于当前 main 版本。正式版使用提供者开通的邮箱身份、独立账户、多门店成员关系和私有报告存储。本文先给出一次性部署，再说明更新、备份和迁移；日常账户与门店操作见 [运行维护](OPERATIONS.md)。
+核对日期：2026-10-01。适用于当前 main 版本。正式版使用提供者开通的邮箱身份、独立账户、多门店成员关系和私有报告存储。本文先给出一次性部署，再说明更新、备份和迁移；日常账户与门店操作见 [运行维护](OPERATIONS.md)。
 
 ## 1. 使用哪些服务、是否收费
 
@@ -113,7 +113,7 @@ pnpm configure
 pnpm db:production
 ```
 
-检查提示中的资源确实是 `hearing-care-production`，确认应用迁移。首次应依次应用 `migrations-production/` 中 `0001_initial.sql` 至 `0007_independent_accounts.sql` 的全部七个文件；后续新增迁移也应执行。正式数据库保持零客户，之后由员工录入。
+检查提示中的资源确实是 `hearing-care-production`，确认应用迁移。首次应依次应用 `migrations-production/` 中 `0001_initial.sql` 至 `0008_paged_read_indexes.sql` 的全部八个文件；后续新增迁移也应执行。已有网站只执行新的增量迁移，不重新初始化。首次正式数据库保持零客户，之后由员工录入。
 
 `pnpm db:local` 只服务本地演示；`pnpm db:production` 才操作远程正式库。不要将正式迁移应用到 Demo 库或其他已有业务库。
 

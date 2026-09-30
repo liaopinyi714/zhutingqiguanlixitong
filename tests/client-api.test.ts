@@ -56,3 +56,15 @@ it('退出后迟到的身份响应不能恢复旧的门店范围', async () => {
   await api('/me');
   expect(fetcher.mock.calls[2][1].headers['X-Hearing-Store']).toBeUndefined();
 });
+
+it('保留分页和单客错误的状态码，供游标重置和档案不存在处理', async () => {
+  const fetcher = vi.fn();
+  vi.stubGlobal('fetch', fetcher);
+  const { api, ApiError } = await import('../src/api');
+  for (const status of [400, 404]) {
+    fetcher.mockResolvedValueOnce(Response.json({ error: '受控错误' }, { status }));
+    const error = await api('/customers?paged=1').catch((reason) => reason);
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error.status).toBe(status);
+  }
+});

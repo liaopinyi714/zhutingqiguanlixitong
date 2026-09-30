@@ -46,6 +46,7 @@ beforeEach(async () => {
   db.exec(readFileSync('migrations/0010_stores.sql', 'utf8'));
   db.exec(readFileSync('migrations/0011_account_profiles_store_lifecycle.sql', 'utf8'));
   db.exec(readFileSync('migrations/0012_independent_accounts.sql', 'utf8'));
+  db.exec(readFileSync('migrations/0013_paged_read_indexes.sql', 'utf8'));
   const files = new Map<string, ArrayBuffer>();
   env = {
     DEMO_MODE: 'true',

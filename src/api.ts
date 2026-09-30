@@ -1,6 +1,14 @@
 // Per-tab scope must not follow the cookie changed by a different browser tab.
 let requestStore: string | undefined;
 let sessionVersion = 0;
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
 
 export async function api(path: string, method = 'GET', data?: unknown) {
   if (path === '/logout') sessionVersion++;
@@ -25,7 +33,7 @@ export async function api(path: string, method = 'GET', data?: unknown) {
   )
     throw new Error('登录可能已过期。请先保存未提交的内容，再刷新页面重新登录。');
   const result: any = await response.json();
-  if (!response.ok) throw new Error(result.error || '请求失败');
+  if (!response.ok) throw new ApiError(result.error || '请求失败', response.status);
   if (path === '/me' && version === sessionVersion) requestStore = result.tenant_id;
   if (path === '/logout') requestStore = undefined;
   return result;

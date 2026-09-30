@@ -1,6 +1,6 @@
 # 当前 API 契约
 
-核对日期：2026-09-30。这是现有 Web 应用的同源内部接口说明；尚未提供 API Key、外部 SDK、公开注册、独立客户端或版本化 API。
+核对日期：2026-10-01。这是现有 Web 应用的同源内部接口说明；尚未提供 API Key、外部 SDK、公开注册、独立客户端或版本化 API。
 
 ## 1. 通用规则
 
@@ -52,33 +52,36 @@ PUT /accounts 不是注册接口。目标 email 必须在提供者 Secret 店主
 
 ## 3. 客户与业务
 
-| 方法   | 路径                                   | 说明                                                                                        |
-| ------ | -------------------------------------- | ------------------------------------------------------------------------------------------- |
-| GET    | /customers                             | 当前门店未删除客户，按建档时间/姓名；含 birthDate/contactPhone 字段映射                     |
-| GET    | /search?q=关键词                       | 当前门店跨客户、检查、设备、维修、随访文本，最多 50 位客户；LIKE 完整模式最多 50 UTF-8 字节 |
-| POST   | /customers                             | 仅创建基本档案                                                                              |
-| POST   | /intakes                               | `{customer,exam?,fitting?,followup?}`，一次批量建档                                         |
-| GET    | /customers/removed                     | 30 天内已删除客户                                                                           |
-| DELETE | /customers/:id                         | 软删除档案，隐藏子记录                                                                      |
-| POST   | /customers/:id/restore                 | 恢复有效期限内客户                                                                          |
-| GET    | /customers/:id/detail                  | exams/fittings/repairs/followups/attachments/audit；检查和验配 JSON 展开                    |
-| PUT    | /customers/:id/profile                 | 完整客户资料；逐字段 UI 编辑也提交完整资料                                                  |
-| GET    | /customers/:id/removed                 | 客户有效时读取可恢复业务记录                                                                |
-| POST   | /customers/:id/exams                   | 新检查                                                                                      |
-| PUT    | /customers/:id/exams/:recordId         | 完整更新检查                                                                                |
-| POST   | /customers/:id/fittings                | 新验配                                                                                      |
-| PUT    | /customers/:id/fittings/:recordId      | 完整更新验配                                                                                |
-| POST   | /customers/:id/repairs                 | 新维修，设备必须属于同客户同门店且有效                                                      |
-| PUT    | /customers/:id/repairs/:recordId       | 完整更新维修                                                                                |
-| POST   | /customers/:id/followups               | 新随访                                                                                      |
-| PUT    | /customers/:id/followups/:recordId     | 更新计划及完成结果                                                                          |
-| DELETE | /customers/:id/:kind/:recordId         | kind 为 exams/fittings/repairs/followups，软删除                                            |
-| POST   | /customers/:id/:kind/:recordId/restore | 期限和父记录有效时恢复                                                                      |
-| GET    | /devices                               | 有效客户的有效验配，包含客户姓名/电话和 JSON 设备资料                                       |
-| GET    | /repairs                               | 有效客户/设备的维修，包含关联 device                                                        |
-| GET    | /warranties                            | 有效设备中填写了保修日期的记录；到期/90 天提醒由前端筛选                                    |
-| GET    | /followups                             | 有效客户的未删除计划和完成记录                                                              |
-| PUT    | /followups/:id                         | `{result:string}`，去空白后非空、最多 3000 字；设为已完成，不能撤销完成                     |
+| 方法   | 路径                                   | 说明                                                                                                              |
+| ------ | -------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | /customers                             | 当前门店未删除客户游标列表，按 created_at DESC/id DESC；含 birthDate/contactPhone，paged=1 列表不含 history/needs |
+| GET    | /customers/:id                         | 当前门店有效客户完整基本资料，包括 history/needs；不依赖列表页，未找到为 404                                      |
+| GET    | /customers/duplicates                  | name、birthDate、exclude 参数；同门店有效客户精确重复提示，最多 5 条 id/name                                      |
+| GET    | /summary?detail=0或1                   | D1 聚合摘要，detail=1 加来源/年龄/随访类型分布                                                                    |
+| GET    | /search?q=关键词                       | 当前门店跨客户、检查、设备、维修、随访文本，最多 50 位客户；LIKE 完整模式最多 50 UTF-8 字节                       |
+| POST   | /customers                             | 仅创建基本档案                                                                                                    |
+| POST   | /intakes                               | `{customer,exam?,fitting?,followup?}`，一次批量建档                                                               |
+| GET    | /customers/removed                     | 30 天内已删除客户游标列表，按 deleted_at DESC/id DESC                                                             |
+| DELETE | /customers/:id                         | 软删除档案，隐藏子记录                                                                                            |
+| POST   | /customers/:id/restore                 | 恢复有效期限内客户                                                                                                |
+| GET    | /customers/:id/detail                  | exams/fittings/repairs/followups/attachments/audit；检查和验配 JSON 展开                                          |
+| PUT    | /customers/:id/profile                 | 完整客户资料；逐字段 UI 编辑也提交完整资料                                                                        |
+| GET    | /customers/:id/removed                 | 客户有效时读取可恢复业务记录                                                                                      |
+| POST   | /customers/:id/exams                   | 新检查                                                                                                            |
+| PUT    | /customers/:id/exams/:recordId         | 完整更新检查                                                                                                      |
+| POST   | /customers/:id/fittings                | 新验配                                                                                                            |
+| PUT    | /customers/:id/fittings/:recordId      | 完整更新验配                                                                                                      |
+| POST   | /customers/:id/repairs                 | 新维修，设备必须属于同客户同门店且有效                                                                            |
+| PUT    | /customers/:id/repairs/:recordId       | 完整更新维修                                                                                                      |
+| POST   | /customers/:id/followups               | 新随访                                                                                                            |
+| PUT    | /customers/:id/followups/:recordId     | 更新计划及完成结果                                                                                                |
+| DELETE | /customers/:id/:kind/:recordId         | kind 为 exams/fittings/repairs/followups，软删除                                                                  |
+| POST   | /customers/:id/:kind/:recordId/restore | 期限和父记录有效时恢复                                                                                            |
+| GET    | /devices                               | 有效客户的有效验配，包含客户姓名/电话和 JSON 设备资料                                                             |
+| GET    | /repairs                               | 有效客户/设备的维修，包含关联 device                                                                              |
+| GET    | /warranties                            | 有效设备保修游标目录，日期/缺填筛选由 D1 执行，全部含缺填日期记录                                                 |
+| GET    | /followups                             | 有效客户的未删除计划和完成记录                                                                                    |
+| PUT    | /followups/:id                         | `{result:string}`，去空白后非空、最多 3000 字；设为已完成，不能撤销完成                                           |
 
 所有业务接口只允许当前已授权门店。子记录 ID 同时匹配 customer_id、tenant_id；不能用其他门店或其他客户的 ID 修改关系。
 
@@ -125,4 +128,20 @@ Excel 端点返回数据而不是二进制文件。`src/spreadsheetExport.ts` �
 
 ## 5. 扩展前必须保留的规则
 
-不能只凭 Cookie 或请求 body.tenant_id 选择数据；不能为独立客户端去掉 JWT/提供者名单、同源保护或直接开放 R2。当前没有自动写入重试、幂等键、分页或 API 版本兼容承诺。未来正式 API 应另外设计凭证、版本、限流、分页和并发写入策略。
+不能只凭 Cookie 或请求 body.tenant_id 选择数据；不能为独立客户端去掉 JWT/提供者名单、同源保护或直接开放 R2。当前已有有界列表和游标分页，没有自动写入重试、幂等键或 API 版本兼容承诺。未来正式 API 应另外设计凭证、版本、限流和并发写入策略。
+
+## 6. 列表查询和聚合摘要
+
+`/customers`、`/customers/removed`、`/devices`、`/repairs`、`/followups`、`/warranties` 共用以下参数：
+
+- `paged=1` 返回 `{items:数组,nextCursor:字符串或null}`；未带此参数返回有界数组，仍只读一页。
+- `limit` 为 1–100 的整数，默认 50；首页和候选项分别使用更小的 limit。
+- `cursor` 为前一页 nextCursor；首屏省略。不使用 offset；换门店、接口、关键词或筛选必须从第一页开始。
+- `q` 在服务端对整个门店筛选。`%`/`_`/`!` 为普通字符，转义后完整 LIKE 模式不超过 50 UTF-8 字节。
+- `filter` 默认全部，支持：客户（全部/全部客户/待评估/试戴中/已验配/长期随访）；设备（全部/双耳/左耳/右耳）；维修（全部/待送修/维修中/已完成/无法修复）；随访（全部/待完成/今日/已逾期/已完成）；保修（全部/需关注/90 天内到期/已到期/保修中/未填写）；回收站仅全部。
+
+保修全部列表包含未填日期的设备，置于末尾；需关注为已到期加未来 90 天。参数/游标无效返回 400；跨日相对日期游标需重置。客户端每页最多 limit 条，不返回总匹配数；默认门店总数来自摘要，筛选搜索显示本页数量。
+
+摘要字段：date、customers、fitted、status（阶段→数量）、pending、completed、today、overdue、devices、repairs、warrantyAlerts。详细模式另有 sources、ages、types（分组名称→数量）。所有计算排除外店和已删除父/子记录；fitted 按已验配/长期随访阶段统计，与 Excel 按有效验配记录分表的口径不同。
+
+完整排序、索引、主动导出例外和成本边界见 [数据加载](DATA-LOADING.md)。

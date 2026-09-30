@@ -1,32 +1,35 @@
-import { useState, type ReactNode } from 'react';
+import { useState } from 'react';
 import { ArrowRight, Headphones, Plus, Search, ShieldCheck, Users, Wrench, X } from 'lucide-react';
 import { deviceName, deviceSerial, warrantyDays, warrantyLabel } from './workspace';
+import { useDebounced, usePagedResource } from './useReadResource';
+import { PageNavigation } from './PageNavigation';
+import { RecordPicker } from './RecordPicker';
+import { today } from '../shared/calendar';
 
 type Props = {
   kind: 'devices' | 'repairs' | 'warranties';
-  devices: any[];
-  repairs: any[];
-  customers: { id: string; name: string }[];
+  scope: string;
+  total: number | undefined;
+  customerCount: number;
+  deviceCount: number;
   canEdit: boolean;
-  loading?: boolean;
-  loadError?: ReactNode;
   create: (kind: string, customer: string, device?: string) => void;
   open: (customer: string, tab?: string, record?: string, device?: string) => void;
 };
 export function ServiceDirectory({
   kind,
-  devices,
-  repairs,
-  customers,
+  scope,
+  total,
+  customerCount,
+  deviceCount,
   canEdit,
-  loading = false,
-  loadError,
   create,
   open,
 }: Props) {
   const [query, setQuery] = useState('');
   const [creating, setCreating] = useState(false);
   const [target, setTarget] = useState('');
+  const [targetRow, setTargetRow] = useState<any>(null);
   const [filter, setFilter] = useState(kind === 'warranties' ? '需关注' : '全部');
   const repairView = kind === 'repairs';
   const warrantyView = kind === 'warranties';
@@ -35,39 +38,23 @@ export function ServiceDirectory({
     : warrantyView
       ? ['需关注', '90 天内到期', '已到期', '保修中', '未填写', '全部']
       : ['全部', '双耳', '左耳', '右耳'];
-  const source = repairView ? repairs : devices;
-  const matches = (row: any) => {
-    if (filter === '全部') return true;
-    if (repairView) return row.status === filter;
-    if (!warrantyView) return row.side === filter;
-    if (filter === '未填写') return !row.warranty;
-    if (!row.warranty) return false;
-    const days = warrantyDays(row.warranty);
-    if (filter === '需关注') return days <= 90;
-    return filter === '已到期'
-      ? days < 0
-      : filter === '保修中'
-        ? days >= 0
-        : days >= 0 && days <= 90;
-  };
-  const rows = source.filter(
-    (row) =>
-      matches(row) &&
-      [
-        row.name,
-        row.phone,
-        row.problem,
-        row.parts,
-        row.work_done,
-        deviceName(row.device || row),
-        deviceSerial(row.device || row),
-      ]
-        .filter(Boolean)
-        .join(' ')
-        .toLowerCase()
-        .includes(query.trim().toLowerCase()),
+  const q = useDebounced(query);
+  const list = usePagedResource<any>(
+    scope
+      ? '/' + kind + '?paged=1&filter=' + encodeURIComponent(filter) + '&q=' + encodeURIComponent(q)
+      : null,
+    kind === 'warranties' ? scope + ':' + today() : scope,
   );
-  if (warrantyView) rows.sort((a, b) => (a.warranty || '9999').localeCompare(b.warranty || '9999'));
+  const rows = list.items,
+    loading = list.loading || !scope;
+  const loadError = list.error ? (
+    <div className="data-retry" role="alert">
+      <span>{list.error}</span>
+      <button className="button small" onClick={() => void list.reload().catch(() => {})}>
+        重试
+      </button>
+    </div>
+  ) : null;
   const Icon = repairView ? Wrench : warrantyView ? ShieldCheck : Headphones;
   return (
     <>
@@ -75,17 +62,17 @@ export function ServiceDirectory({
         <div>
           <h1>{repairView ? '设备维修' : warrantyView ? '保修提醒' : '验配设备'}</h1>
           <p>
-            {loading ? (
+            {total === undefined ? (
               <span className="skeleton-line skeleton-table-main" />
             ) : (
-              `${source.length} 条${repairView ? '维修记录' : '验配记录'}`
+              `${total} 条${repairView ? '维修记录' : '验配记录'}`
             )}
           </p>
         </div>
         {canEdit && !warrantyView && (
           <button
             className="button primary"
-            disabled={repairView ? !devices.length : !customers.length}
+            disabled={repairView ? !deviceCount : !customerCount}
             onClick={() => setCreating(!creating)}
           >
             <Plus size={16} />
@@ -98,27 +85,22 @@ export function ServiceDirectory({
           className="directory-create panel"
           onSubmit={(event) => {
             event.preventDefault();
-            const device = devices.find((row) => row.id === target);
+            const device = targetRow;
             if (repairView && device) create('repair', device.customer_id, device.id);
             else if (!repairView && target) create('fitting', target);
           }}
         >
           <label className="field">
             <span>{repairView ? '选择客户的设备' : '选择客户'}</span>
-            <select required value={target} onChange={(event) => setTarget(event.target.value)}>
-              <option value="">请选择</option>
-              {repairView
-                ? devices.map((device) => (
-                    <option key={device.id} value={device.id}>
-                      {device.name} · {deviceName(device)} · {deviceSerial(device)}
-                    </option>
-                  ))
-                : customers.map((customer) => (
-                    <option key={customer.id} value={customer.id}>
-                      {customer.name}
-                    </option>
-                  ))}
-            </select>
+            <RecordPicker
+              scope={scope}
+              kind={repairView ? 'devices' : 'customers'}
+              value={target}
+              onChange={(id, row) => {
+                setTarget(id);
+                setTargetRow(row);
+              }}
+            />
           </label>
           <button className="button primary" type="submit">
             继续
@@ -290,7 +272,12 @@ export function ServiceDirectory({
           )}
         </div>
         <div className="table-footer">
-          {loading ? <span className="skeleton-line skeleton-task-date" /> : `共 ${rows.length} 条`}
+          {loading ? (
+            <span className="skeleton-line skeleton-task-date" />
+          ) : (
+            `本页 ${rows.length} 条`
+          )}
+          <PageNavigation resource={list} />
         </div>
       </section>
     </>

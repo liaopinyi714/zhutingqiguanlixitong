@@ -1,6 +1,6 @@
 # 只用网页部署到 Cloudflare
 
-核对日期：2026-09-30。本指南适用于 `liaopinyi714/zhutingqiguanlixitong` 仓库的 `main` 分支。你不需要在电脑上安装 Git、Node.js 或 pnpm，也不需要打开命令行。Cloudflare 的 Workers Builds 会从 GitHub 拉取代码，在云端运行项目自带的检查、建表和发布步骤。日常账户开通和门店操作见 [运行维护](OPERATIONS.md)。
+核对日期：2026-10-01。本指南适用于 `liaopinyi714/zhutingqiguanlixitong` 仓库的 `main` 分支。你不需要在电脑上安装 Git、Node.js 或 pnpm，也不需要打开命令行。Cloudflare 的 Workers Builds 会从 GitHub 拉取代码，在云端运行项目自带的检查、建表和发布步骤。日常账户开通和门店操作见 [运行维护](OPERATIONS.md)。
 
 首次配置预计需要 Cloudflare 账户、GitHub 仓库的管理权限、你能收验证码的员工邮箱。界面文字可能随控制台版本略有变化，认准对应的 Worker、D1、R2、Access 和 Builds 页面。
 
@@ -96,7 +96,7 @@ R2 有免费额度，但超过免费额度会按量收费；开通页面可能�
 7. 在 **Settings → Builds → Branch control** 关闭 **Enable Preview Builds**。本项目第一次上线只使用 `main` 的正式构建；脚本也会拒绝在其他 Cloudflare 构建分支操作正式数据库。
 8. 保存构建设置。若连接仓库时已经启动了第一次构建，而此时变量或 Token 尚未填完，第一次失败是预期结果。设置完成后打开 **Builds**，对最近的 `main` 构建点 **Retry**；若界面没有 Retry，可从 GitHub 网页对 `main` 提交一次实际代码更新来触发新构建。
 
-`build:cloudflare` 在云端先核对配置，运行 `pnpm check`（文档链接、测试、类型检查与前端构建），再对远程 D1 应用尚未运行的迁移。只有全部成功，Deploy command 才会发布网站。首次执行正式目录的七个迁移，建立业务表、账户和成员关系等，正式库里不会生成演示客户。
+`build:cloudflare` 在云端先核对配置，运行 `pnpm check`（文档链接、测试、类型检查与前端构建），再对远程 D1 应用尚未运行的迁移。只有全部成功，Deploy command 才会发布网站。首次执行正式目录的八个迁移（截至 `0008_paged_read_indexes.sql`），建立业务表、账户、成员关系和分页索引等，正式库里不会生成演示客户。已有网站仅追加未执行的迁移，不需重新建库。
 
 ## 7. 核对部署结果
 

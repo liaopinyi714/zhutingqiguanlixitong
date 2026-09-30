@@ -1,6 +1,6 @@
 # 数据模型与生命周期
 
-核对日期：2026-09-30。实际结构由 `migrations-production/0001_initial.sql` 至 `0007_independent_accounts.sql` 累积产生。本地演示迁移链独立存在。
+核对日期：2026-10-01。实际结构由 `migrations-production/0001_initial.sql` 至 `0008_paged_read_indexes.sql` 累积产生。本地演示迁移链独立存在。
 
 ## 1. 关系
 
@@ -97,6 +97,6 @@ R2 对象键为 `门店ID/客户ID/附件UUID`；原文件名仅存在目录，�
 
 ## 7. 迁移维护
 
-禁止改写已经部署的迁移，新增变更要分别追加正式与演示迁移。正式库不运行 Demo seed。索引主要覆盖 tenant、customer、due、deleted_at 和设备关联；全文检索、服务端分页/聚合尚未实现。
+禁止改写已经部署的迁移，新增变更要分别追加正式与演示迁移。正式库不运行 Demo seed。索引覆盖 tenant、customer、due、deleted_at、设备关联，以及新游标所需的复合排序、客户阶段和保修/维修表达式。已实现服务端分页/聚合，未引入全文索引；新增索引用途及成本见 [数据加载](DATA-LOADING.md)。
 
 跨服务商迁移必须保留门店 ID、账户 email、成员状态、客户/设备/维修关系、软删除时间及对象键。恢复旧备份可能重新出现已删除资料，应停写核对后再开放访问。

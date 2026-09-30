@@ -14,6 +14,7 @@ import { isLocalDemo } from './auth';
 import { accountRoutes } from './accounts';
 import { installHttpBoundary } from './http';
 import { exportRoutes } from './exports';
+import { installReadRoutes } from './read-model';
 import type { Env, AppContext } from './types';
 export const app = new Hono<AppContext>();
 const id = () => crypto.randomUUID();
@@ -49,15 +50,8 @@ app.post('/api/logout', async (c) => {
   return c.json({ ok: true });
 });
 app.route('/api/accounts', accountRoutes);
+installReadRoutes(app);
 const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date, contactPhone: r.contact_phone });
-app.get('/api/customers', async (c) => {
-  const rows = await c.env.DB.prepare(
-    'SELECT * FROM customers WHERE tenant_id=? AND deleted_at IS NULL ORDER BY created_at DESC,name',
-  )
-    .bind(c.get('session').tenant_id)
-    .all();
-  return c.json(rows.results.map(mapCustomer));
-});
 app.get('/api/search', async (c) => {
   const query = (c.req.query('q') || '').trim();
   if (!query) return c.json([]);
@@ -201,15 +195,6 @@ app.post('/api/intakes', async (c) => {
   }
   await c.env.DB.batch(statements);
   return c.json({ id: customerId }, 201);
-});
-app.get('/api/customers/removed', async (c) => {
-  if (c.get('session').role !== '店主') return c.json({ error: '只有店主可以查看已删除档案' }, 403);
-  const rows = await c.env.DB.prepare(
-    'SELECT * FROM customers WHERE tenant_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
-  )
-    .bind(c.get('session').tenant_id, retentionCutoff())
-    .all();
-  return c.json(rows.results.map(mapCustomer));
 });
 app.delete('/api/customers/:id', async (c) => {
   const s = c.get('session'),
@@ -622,60 +607,6 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
     return c.json({ ok: true });
   });
 }
-app.get('/api/devices', async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT f.id,f.customer_id,f.date,c.name,c.phone,f.data,
-      (SELECT COUNT(*) FROM repairs r WHERE r.fitting_id=f.id AND r.customer_id=f.customer_id AND r.tenant_id=f.tenant_id AND r.deleted_at IS NULL) AS repair_count
-     FROM fittings f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL
-     WHERE f.tenant_id=? AND f.deleted_at IS NULL ORDER BY f.date DESC`,
-  )
-    .bind(c.get('session').tenant_id)
-    .all();
-  return c.json(
-    rows.results.map((r: any) => {
-      const { data, ...record } = r;
-      return { ...JSON.parse(data), ...record };
-    }),
-  );
-});
-app.get('/api/repairs', async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT r.*,c.name,c.phone,f.data AS device_data
-     FROM repairs r
-     JOIN customers c ON c.id=r.customer_id AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
-     JOIN fittings f ON f.id=r.fitting_id AND f.customer_id=r.customer_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
-     WHERE r.tenant_id=? AND r.deleted_at IS NULL
-     ORDER BY CASE r.status WHEN '待送修' THEN 0 WHEN '维修中' THEN 1 ELSE 2 END,r.occurred_date DESC`,
-  )
-    .bind(c.get('session').tenant_id)
-    .all();
-  return c.json(
-    rows.results.map((r: any) => {
-      const { device_data, ...record } = r;
-      return { ...record, device: { ...JSON.parse(device_data), id: r.fitting_id } };
-    }),
-  );
-});
-app.get('/api/warranties', async (c) => {
-  const rows = await c.env.DB.prepare(
-    `SELECT f.id,f.customer_id,c.name,c.phone,f.data
-    FROM fittings f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL
-    WHERE f.tenant_id=? AND f.deleted_at IS NULL ORDER BY f.date DESC`,
-  )
-    .bind(c.get('session').tenant_id)
-    .all();
-  return c.json(
-    rows.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })).filter((r: any) => r.warranty),
-  );
-});
-app.get('/api/followups', async (c) => {
-  const r = await c.env.DB.prepare(
-    'SELECT f.*,c.name,c.phone FROM followups f JOIN customers c ON c.id=f.customer_id AND c.tenant_id=f.tenant_id AND c.deleted_at IS NULL WHERE f.tenant_id=? AND f.deleted_at IS NULL ORDER BY f.completed,f.due',
-  )
-    .bind(c.get('session').tenant_id)
-    .all();
-  return c.json(r.results);
-});
 app.put('/api/followups/:id', async (c) => {
   const d = await c.req.json();
   if (typeof d.result !== 'string' || !d.result.trim() || d.result.length > 3000)
