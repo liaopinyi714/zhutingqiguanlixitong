@@ -89,6 +89,7 @@ server/mutations.ts    写入时范围校验、状态冲突和事务审计
 server/attachments.ts  私有报告上传、补偿、删除恢复与下载
 server/auth.ts         Access JWT 与提供者名单校验
 server/accounts.ts     独立账户与门店成员关系
+server/account-resolution.ts 单次 D1 身份/门店解析与首次资料引导
 server/exports.ts      JSON/Excel 数据快照接口
 server/read-model.ts   门店列表、客户详情入口和聚合统计
 server/pagination.ts   有界参数、位置游标与分页响应

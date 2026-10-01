@@ -2,7 +2,7 @@ import type { Hono } from 'hono';
 import { getCookie, deleteCookie } from 'hono/cookie';
 import { bodyLimit } from 'hono/body-limit';
 import { accessSession, AuthError, isLocalDemo } from './auth';
-import { resolveAccount } from './accounts';
+import { resolveAccountRequest } from './account-resolution';
 import type { AppContext } from './types';
 import { WriteConflictError } from './mutations';
 import { PERFORMANCE_DIAGNOSTICS, RequestTimings, measureTiming } from './timing';
@@ -72,25 +72,18 @@ export function installHttpBoundary(
       c.req.path === '/api/accounts/stores' ||
       /^\/api\/accounts\/stores\/[^/]+\/switch$/.test(c.req.path);
     const timings = c.get('timings');
-    // /me's database work happens here, before the route returns the session.
-    const meTimings = c.req.path === '/api/me' ? timings : undefined;
-    if (!demo) {
-      const lookup = (email: string) =>
-        measureTiming(timings, 'account_store', async () => {
-          try {
-            return await resolveAccount(c.env, email, false, selectedStore, meTimings);
-          } catch (error) {
-            if (
-              explicitStore !== undefined ||
-              !selectedStore ||
-              !mayRecover ||
-              !(error instanceof AuthError)
-            )
-              throw error;
-            deleteCookie(c, 'hearing_store', { path: '/' });
-            return resolveAccount(c.env, email, false, undefined, meTimings);
-          }
+    const lookup = (email: string) =>
+      measureTiming(timings, 'account_store', async () => {
+        const resolved = await resolveAccountRequest(c.env, email, demo, selectedStore, timings, {
+          me: c.req.path === '/api/me',
+          includeStores: c.req.path === '/api/accounts/stores',
+          recoverStore: explicitStore === undefined && !!selectedStore && mayRecover,
         });
+        c.set('accountResolution', resolved);
+        if (resolved.recoveredStore) deleteCookie(c, 'hearing_store', { path: '/' });
+        return resolved.session;
+      });
+    if (!demo) {
       c.set('session', await accessSession(c.req.raw, c.env, lookup, timings));
       return next();
     }
@@ -103,24 +96,7 @@ export function installHttpBoundary(
         )
       : null;
     if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
-    c.set(
-      'session',
-      await measureTiming(timings, 'account_store', async () => {
-        try {
-          return await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore, meTimings);
-        } catch (error) {
-          if (
-            explicitStore !== undefined ||
-            !selectedStore ||
-            !mayRecover ||
-            !(error instanceof AuthError)
-          )
-            throw error;
-          deleteCookie(c, 'hearing_store', { path: '/' });
-          return resolveAccount(c.env, 'owner@demo.invalid', true, undefined, meTimings);
-        }
-      }),
-    );
+    c.set('session', await lookup('owner@demo.invalid'));
     await next();
   });
   app.use('/api/*', async (c, next) =>

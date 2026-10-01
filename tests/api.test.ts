@@ -100,8 +100,7 @@ describe('演示 API', () => {
       expect(header).toContain('worker;dur=');
       expect(header).toContain('account_store;dur=');
       expect(header).toContain('demo_session_d1;dur=');
-      expect(header).toContain('me_profile_d1;dur=');
-      expect(header).toContain('me_stores_d1;dur=');
+      expect(header).toContain('me_resolve_d1;dur=');
       expect(header).not.toContain('access_jwt');
       expect(header).not.toContain('owner@');
     },

@@ -140,6 +140,7 @@ describe('正式环境', () => {
       async (detail) => {
         const jwt = await token();
         let clock = 0;
+        let inBatch = false;
         const timer = vi.spyOn(performance, 'now').mockImplementation(() => clock);
         const fetchKeys = fetch;
         vi.stubGlobal(
@@ -162,22 +163,32 @@ describe('正式环境', () => {
               return inner.run();
             },
             all: async () => {
-              clock += 5;
+              if (!inBatch) clock += 5;
               return inner.all();
             },
           };
         }
         env.DB.prepare = vi.fn(timedStatement);
+        const originalBatch = env.DB.batch;
+        env.DB.batch = async (statements: any[]) => {
+          clock += 5; // One simulated network round trip for the whole batch.
+          inBatch = true;
+          try {
+            return await originalBatch(statements);
+          } finally {
+            inBatch = false;
+          }
+        };
         const batch = vi.spyOn(env.DB, 'batch');
         try {
           const first = await req('/me', jwt);
           expect(first.status).toBe(200);
           expect(first.headers.get('Server-Timing')).toBe(
-            'worker;dur=57.00, access_jwt;dur=7.00, account_store;dur=50.00, me_profile_d1;dur=10.00, me_membership_d1;dur=5.00, me_store_d1;dur=5.00, me_stores_d1;dur=5.00, me_bootstrap_d1;dur=25.00',
+            'worker;dur=22.00, access_jwt;dur=7.00, account_store;dur=15.00, me_resolve_d1;dur=10.00, me_bootstrap_d1;dur=5.00',
           );
-          expect(env.DB.prepare).toHaveBeenCalledTimes(10);
+          expect(env.DB.prepare).toHaveBeenCalledTimes(7);
           expect(batch).toHaveBeenCalledTimes(1);
-          expect(batch.mock.calls[0][0]).toHaveLength(4);
+          expect(batch.mock.calls[0][0]).toHaveLength(5);
           const profile = (await first.json()) as any;
           expect(profile.email).toBe(owner.email);
           expect(profile.tenant_id).toBe(owner.tenantId);
@@ -185,9 +196,9 @@ describe('正式环境', () => {
 
           const warm = await req('/me', jwt);
           expect(warm.headers.get('Server-Timing')).toBe(
-            'worker;dur=15.00, access_jwt;dur=0.00, account_store;dur=15.00, me_profile_d1;dur=5.00, me_membership_d1;dur=5.00, me_stores_d1;dur=5.00',
+            'worker;dur=5.00, access_jwt;dur=0.00, account_store;dur=5.00, me_resolve_d1;dur=5.00',
           );
-          expect(env.DB.prepare).toHaveBeenCalledTimes(13);
+          expect(env.DB.prepare).toHaveBeenCalledTimes(8);
           expect(batch).toHaveBeenCalledTimes(1);
           expect(fetch).toHaveBeenCalledTimes(1);
           expect(await warm.json()).toEqual(profile);
@@ -195,9 +206,9 @@ describe('正式环境', () => {
           const summary = await req('/summary?detail=' + detail, jwt);
           expect(summary.status).toBe(200);
           expect(summary.headers.get('Server-Timing')).toBe(
-            'worker;dur=35.00, access_jwt;dur=0.00, account_store;dur=15.00, summary_d1;dur=20.00',
+            'worker;dur=10.00, access_jwt;dur=0.00, account_store;dur=5.00, summary_d1;dur=5.00, account_resolve_d1;dur=5.00',
           );
-          expect(env.DB.prepare).toHaveBeenCalledTimes(20);
+          expect(env.DB.prepare).toHaveBeenCalledTimes(13);
           expect(batch).toHaveBeenCalledTimes(2);
           expect(batch.mock.calls[1][0]).toHaveLength(4);
           expect(await summary.json()).toMatchObject({ customers: 0, devices: 0, repairs: 0 });
@@ -232,7 +243,7 @@ describe('正式环境', () => {
         const response = await req('/summary', jwt);
         expect(response.status).toBe(500);
         expect(response.headers.get('Server-Timing')).toMatch(
-          /^worker;dur=\d+\.\d{2}, access_jwt;dur=\d+\.\d{2}, account_store;dur=\d+\.\d{2}, summary_d1;dur=\d+\.\d{2}$/,
+          /^worker;dur=\d+\.\d{2}, access_jwt;dur=\d+\.\d{2}, account_store;dur=\d+\.\d{2}, summary_d1;dur=\d+\.\d{2}, account_resolve_d1;dur=\d+\.\d{2}$/,
         );
         expect(await response.json()).toEqual({ error: '服务暂时不可用，请稍后重试。' });
         expect(log).toHaveBeenCalledTimes(1); // Existing sanitized error handler only.
@@ -245,6 +256,129 @@ describe('正式环境', () => {
       }
     });
   });
+  it('门店列表复用单次认证快照，失效 Cookie 恢复不重复执行账户查询', async () => {
+    const jwt = await token();
+    await req('/me', jwt);
+    db.prepare('INSERT INTO stores(id,name) VALUES(?,?)').run('another', '另一个门店');
+    db.prepare(
+      "INSERT INTO store_memberships(email,tenant_id,name,source) VALUES(?,?,?,'managed')",
+    ).run(owner.email, 'another', owner.name);
+    const prepare = vi.spyOn(env.DB, 'prepare');
+    const batch = vi.spyOn(env.DB, 'batch');
+    const response = await req('/accounts/stores', jwt, 'GET', undefined, {
+      Cookie: 'hearing_store=no-longer-available',
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(
+      expect.arrayContaining([
+        { id: owner.tenantId, name: owner.storeName, current: true },
+        { id: 'another', name: '另一个门店', current: false },
+      ]),
+    );
+    expect(response.headers.get('Set-Cookie')).toContain('hearing_store=');
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(batch).not.toHaveBeenCalled();
+    prepare.mockClear();
+    const explicit = await req('/me', jwt, 'GET', undefined, {
+      'X-Hearing-Store': 'no-longer-available',
+    });
+    expect(explicit.status).toBe(403);
+    expect(explicit.headers.get('Set-Cookie')).toBeNull();
+    expect(prepare).toHaveBeenCalledTimes(1);
+  });
+
+  it('周期在线状态只读取一次身份并写入一次活动时间，不重复加载门店列表', async () => {
+    const jwt = await token();
+    await req('/me', jwt);
+    const prepare = vi.spyOn(env.DB, 'prepare');
+    const batch = vi.spyOn(env.DB, 'batch');
+    const response = await req('/accounts/presence', jwt, 'POST', undefined, {
+      'X-Hearing-Store': owner.tenantId,
+    });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(prepare).toHaveBeenCalledTimes(2);
+    expect(batch).not.toHaveBeenCalled();
+    if (PERFORMANCE_DIAGNOSTICS) {
+      expect(response.headers.get('Server-Timing')).toContain('account_resolve_d1;dur=');
+      expect(response.headers.get('Server-Timing')).toContain('presence_d1;dur=');
+    }
+    expect(
+      Number(
+        db.prepare('SELECT last_seen_at FROM store_memberships WHERE email=?').get(owner.email)!
+          .last_seen_at,
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it.each(['disabled', 'left', 'deleted', 'expired'])(
+    '保留同一 JWT 时 %s 立即阻止业务读取与在线更新',
+    async (change) => {
+      const jwt = await token();
+      await req('/me', jwt);
+      if (change === 'disabled')
+        db.prepare('UPDATE store_memberships SET enabled=0 WHERE email=?').run(owner.email);
+      if (change === 'left')
+        db.prepare(
+          'UPDATE store_memberships SET enabled=0,left_at=CURRENT_TIMESTAMP WHERE email=?',
+        ).run(owner.email);
+      if (change === 'deleted')
+        db.prepare('UPDATE stores SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(owner.tenantId);
+      if (change === 'expired')
+        db.prepare("UPDATE stores SET abandoned_at='2000-01-01 00:00:00' WHERE id=?").run(
+          owner.tenantId,
+        );
+      const prepare = vi.spyOn(env.DB, 'prepare');
+      expect(
+        (await req('/summary', jwt, 'GET', undefined, { 'X-Hearing-Store': owner.tenantId }))
+          .status,
+      ).toBe(403);
+      expect(
+        (
+          await req('/accounts/presence', jwt, 'POST', undefined, {
+            'X-Hearing-Store': owner.tenantId,
+          })
+        ).status,
+      ).toBe(403);
+      expect(prepare).toHaveBeenCalledTimes(2); // Authorization only; no business query/update.
+      expect(
+        db.prepare('SELECT last_seen_at FROM store_memberships WHERE email=?').get(owner.email)!
+          .last_seen_at,
+      ).toBeNull();
+    },
+  );
+
+  it.each(['store', 'membership'])(
+    '在线更新执行前 %s 被撤销，SQL 二次校验阻止活动写入',
+    async (scope) => {
+      const jwt = await token();
+      await req('/me', jwt);
+      env.DB.prepare = (sql: string) => {
+        const bind = (...args: any[]) => ({
+          ...statement(sql, args),
+          run: async () => {
+            if (sql.startsWith('UPDATE store_memberships SET last_seen_at')) {
+              if (scope === 'store')
+                db.prepare('UPDATE stores SET deleted_at=CURRENT_TIMESTAMP WHERE id=?').run(
+                  owner.tenantId,
+                );
+              else
+                db.prepare('UPDATE store_memberships SET enabled=0 WHERE email=?').run(owner.email);
+            }
+            return statement(sql, args).run();
+          },
+        });
+        return { ...statement(sql), bind };
+      };
+      expect((await req('/accounts/presence', jwt, 'POST')).status).toBe(200);
+      expect(
+        db.prepare('SELECT last_seen_at FROM store_memberships WHERE email=?').get(owner.email)!
+          .last_seen_at,
+      ).toBeNull();
+      expect((await req('/summary', jwt)).status).toBe(403);
+    },
+  );
+
   it.each(['invite', 'rename'])('写入前成员被停用时拒绝门店管理操作：%s', async (operation) => {
     env.STAFF_ACCOUNTS = JSON.stringify([
       owner,
@@ -306,7 +440,7 @@ describe('正式环境', () => {
     const jwt = await token();
     expect((await req('/me', jwt)).status).toBe(200);
     expect(batch.mock.calls).toHaveLength(1);
-    expect((batch.mock.calls[0][0] as unknown[]).length).toBe(4);
+    expect((batch.mock.calls[0][0] as unknown[]).length).toBe(5);
     expect((db.prepare('SELECT COUNT(*) n FROM store_memberships').get() as any).n).toBe(26);
     expect((db.prepare('SELECT COUNT(*) n FROM accounts').get() as any).n).toBe(26);
     await req('/accounts/stores/store-001/leave', jwt, 'POST');

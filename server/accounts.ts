@@ -1,23 +1,20 @@
 import { Hono, type Context } from 'hono';
 import { deleteCookie, setCookie } from 'hono/cookie';
 import { z } from 'zod';
-import { AuthError, isLocalDemo, readStaffAccounts, type AuthEnv, type Session } from './auth';
+import { isLocalDemo, type AuthEnv, type Session } from './auth';
 import { validAvatar } from './avatar';
 import { retentionCutoff } from './retention';
 import { activeStoreWrite, auditAfterWrite, commitWrite, WriteConflictError } from './mutations';
-import { measureTiming, type RequestTimings } from './timing';
+import { measureTiming } from './timing';
+import {
+  accountProfile,
+  configuredAccounts,
+  resolveAccount,
+  storesForAccount,
+} from './account-resolution';
+import type { AppContext } from './types';
 
 type Env = AuthEnv & { DB: D1Database };
-type Account = {
-  email: string;
-  tenant_id: string;
-  name: string;
-  store_name: string;
-  enabled: number;
-  source: 'config' | 'managed';
-  avatar?: string;
-};
-type Store = { id: string; name: string; enabled: number; source: string };
 const emailSchema = z
   .string()
   .trim()
@@ -31,153 +28,7 @@ const accountSchema = z.object({
   avatar: z.string().refine(validAvatar).optional(),
 });
 const storeSchema = z.object({ name: z.string().trim().min(1).max(80) });
-export const accountRoutes = new Hono<{ Bindings: Env; Variables: { session: Session } }>();
-
-export function configuredAccounts(env: AuthEnv, demo: boolean): Account[] {
-  if (demo)
-    return [
-      {
-        email: 'owner@demo.invalid',
-        tenant_id: 'demo-store',
-        name: '演示店主',
-        store_name: '聆讯听力 · 演示门店',
-        enabled: 1,
-        source: 'config',
-      },
-    ];
-  return readStaffAccounts(env.STAFF_ACCOUNTS)
-    .filter((a) => a.role === '店主')
-    .map((a) => ({
-      email: a.email,
-      tenant_id: a.tenantId || '',
-      name: a.name,
-      store_name: a.storeName || '',
-      enabled: 1,
-      source: 'config' as const,
-    }));
-}
-
-async function accountProfile(env: Env, email: string, demo: boolean, timings?: RequestTimings) {
-  const config = configuredAccounts(env, demo);
-  const configured = config.find((a) => a.email === email);
-  // A database row, membership or valid Access JWT cannot provision an identity.
-  if (!configured) throw new AuthError('此账户未由系统提供者授权，请联系系统提供者', 403);
-  let saved = await measureTiming(timings, 'me_profile_d1', () =>
-    env.DB.prepare('SELECT * FROM accounts WHERE email=?').bind(email).first<Account>(),
-  );
-  if (!saved) {
-    await measureTiming(timings, 'me_bootstrap_d1', () =>
-      env.DB.prepare(
-        "INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'config')",
-      )
-        .bind(email, configured.tenant_id, configured.name, configured.store_name)
-        .run(),
-    );
-    saved = await measureTiming(timings, 'me_profile_d1', () =>
-      env.DB.prepare('SELECT * FROM accounts WHERE email=?').bind(email).first<Account>(),
-    );
-  }
-  // Bootstrap initial store memberships only once. Disabled and voluntarily left
-  // memberships remain as tombstones, so the secret cannot silently re-add them.
-  if (configured.tenant_id) {
-    const member = await measureTiming(timings, 'me_membership_d1', () =>
-      env.DB.prepare('SELECT email FROM store_memberships WHERE email=? AND tenant_id=?')
-        .bind(email, configured.tenant_id)
-        .first(),
-    );
-    const store = member
-      ? null
-      : await measureTiming(timings, 'me_store_d1', () =>
-          env.DB.prepare('SELECT deleted_at,abandoned_at FROM stores WHERE id=?')
-            .bind(configured.tenant_id)
-            .first<{ deleted_at: string | null; abandoned_at: string | null }>(),
-        );
-    if (
-      !member &&
-      !store?.deleted_at &&
-      (!store?.abandoned_at || store.abandoned_at > retentionCutoff())
-    ) {
-      const peers = config.filter((a) => a.tenant_id === configured.tenant_id);
-      await measureTiming(timings, 'me_bootstrap_d1', () =>
-        env.DB.batch([
-          env.DB.prepare('INSERT OR IGNORE INTO stores(id,name) VALUES(?,?)').bind(
-            configured.tenant_id,
-            configured.store_name,
-          ),
-          // A statement per peer can exceed D1 Free's 50-query request limit.
-          // json_each keeps bootstrap at four statements regardless of roster size.
-          env.DB.prepare(
-            `INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source)
-           SELECT json_extract(value,'$.email'),json_extract(value,'$.tenant_id'),
-             json_extract(value,'$.name'),json_extract(value,'$.store_name'),1,'config'
-           FROM json_each(?)`,
-          ).bind(JSON.stringify(peers)),
-          env.DB.prepare(
-            `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
-           SELECT json_extract(p.value,'$.email'),json_extract(p.value,'$.tenant_id'),
-             json_extract(p.value,'$.name'),1,'config' FROM json_each(?) p
-           JOIN stores t ON t.id=json_extract(p.value,'$.tenant_id') WHERE t.deleted_at IS NULL
-             AND (t.abandoned_at IS NULL OR t.abandoned_at>datetime('now','-30 days'))`,
-          ).bind(JSON.stringify(peers)),
-          env.DB.prepare(
-            "UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL AND abandoned_at>datetime('now','-30 days')",
-          ).bind(configured.tenant_id),
-        ]),
-      );
-    }
-  }
-  return {
-    account: { ...configured, name: saved?.name || configured.name, avatar: saved?.avatar || '' },
-    configured,
-  };
-}
-
-async function storesForAccount(
-  env: Env,
-  email: string,
-  timings?: RequestTimings,
-): Promise<Store[]> {
-  const rows = (
-    await measureTiming(timings, 'me_stores_d1', () =>
-      env.DB.prepare(
-        `SELECT m.tenant_id id,s.name,m.enabled,m.source
-     FROM store_memberships m JOIN stores s ON s.id=m.tenant_id
-     WHERE m.email=? AND m.enabled=1 AND s.deleted_at IS NULL AND (s.abandoned_at IS NULL OR s.abandoned_at>?)
-     ORDER BY s.created_at,s.name`,
-      )
-        .bind(email, retentionCutoff())
-        .all<Store>(),
-    )
-  ).results;
-  return rows;
-}
-
-export async function resolveAccount(
-  env: Env,
-  email: string,
-  demo = false,
-  selectedStore?: string,
-  timings?: RequestTimings,
-): Promise<Session> {
-  const { account, configured } = await accountProfile(env, email, demo, timings);
-  const stores = await storesForAccount(env, email, timings);
-  const store =
-    selectedStore === ''
-      ? undefined
-      : selectedStore
-        ? stores.find((row) => row.id === selectedStore)
-        : stores.find((row) => row.id === configured.tenant_id) || stores[0];
-  if (selectedStore && !store) throw new AuthError('此账户没有当前门店的访问权限', 403);
-  return {
-    role: '店主',
-    tenant_id: store?.id || '',
-    name: account.name,
-    email,
-    storeName: store?.name || '',
-    actor: `${account.name} <${email}>`,
-    avatar: account.avatar || '',
-  };
-}
+export const accountRoutes = new Hono<AppContext>();
 
 function audit(env: Env, s: Session, action: string, tenantId = s.tenant_id) {
   return env.DB.prepare(
@@ -196,10 +47,7 @@ function markAbandoned(env: Env, storeId: string, demo: boolean) {
         AND m.email=json_extract(p.value,'$.email'))`,
   ).bind(storeId, JSON.stringify(provided));
 }
-function selectCookie(
-  c: Context<{ Bindings: Env; Variables: { session: Session } }>,
-  storeId: string,
-) {
+function selectCookie(c: Context<AppContext>, storeId: string) {
   if (!storeId) {
     deleteCookie(c, 'hearing_store', { path: '/' });
     return;
@@ -312,17 +160,21 @@ accountRoutes.put('/', async (c) => {
 accountRoutes.post('/presence', async (c) => {
   const s = c.get('session');
   if (s.tenant_id)
-    await c.env.DB.prepare(
-      'UPDATE store_memberships SET last_seen_at=? WHERE email=? AND tenant_id=? AND enabled=1',
-    )
-      .bind(Date.now(), s.email, s.tenant_id)
-      .run();
+    await measureTiming(c.get('timings'), 'presence_d1', () =>
+      c.env.DB.prepare(
+        `UPDATE store_memberships SET last_seen_at=? WHERE email=? AND tenant_id=? AND enabled=1
+       AND ${activeStoreWrite}`,
+      )
+        .bind(Date.now(), s.email, s.tenant_id, s.tenant_id, s.email)
+        .run(),
+    );
   return c.json({ ok: true });
 });
 
 accountRoutes.get('/stores', async (c) => {
   const s = c.get('session');
-  const stores = await storesForAccount(c.env, s.email || '');
+  const stores =
+    c.get('accountResolution')?.stores ?? (await storesForAccount(c.env, s.email || ''));
   return c.json(
     stores.map((store) => ({ id: store.id, name: store.name, current: store.id === s.tenant_id })),
   );

@@ -7,11 +7,11 @@ const stages = [
   'access_jwt',
   'account_store',
   'summary_d1',
-  'me_profile_d1',
-  'me_membership_d1',
-  'me_store_d1',
-  'me_stores_d1',
+  'account_resolve_d1',
+  'account_bootstrap_d1',
+  'me_resolve_d1',
   'me_bootstrap_d1',
+  'presence_d1',
   'demo_session_d1',
 ] as const;
 type Stage = (typeof stages)[number];

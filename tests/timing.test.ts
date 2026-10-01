@@ -41,16 +41,16 @@ describe('临时请求耗时', () => {
       clock += 7;
     });
     await timings.measure('account_store', async () => {
-      await timings.measure('me_profile_d1', async () => {
+      await timings.measure('me_resolve_d1', async () => {
         clock += 11;
       });
-      await timings.measure('me_profile_d1', async () => {
+      await timings.measure('me_resolve_d1', async () => {
         clock += 13;
       });
       clock += 3;
     });
     expect(timings.header()).toBe(
-      'worker;dur=34.00, access_jwt;dur=7.00, account_store;dur=27.00, me_profile_d1;dur=24.00',
+      'worker;dur=34.00, access_jwt;dur=7.00, account_store;dur=27.00, me_resolve_d1;dur=24.00',
     );
   });
 
