@@ -1517,7 +1517,7 @@ export default function App() {
                     <h2>已删除档案</h2>
                   </div>
                   <p className="muted retention-note">
-                    删除后保留 30 天；到期自动彻底清除，之后无法恢复。
+                    以下为恢复截止时间（北京时间）。到期后无法恢复，系统将定时清理。
                   </p>
                   {!dataReady('removed') ? (
                     dataFallback(['removed'], 3, <RemovedCustomersSkeleton />)
@@ -1528,8 +1528,8 @@ export default function App() {
                           <span>
                             <strong>{item.name}</strong>
                             <small>
-                              {item.phone || '未填写电话'} · 可恢复至{' '}
-                              {restoreDeadline(item.deleted_at || '')}
+                              {item.phone || '未填写电话'} ·{' '}
+                              {restoreDeadline(item.deleted_at || '')} 前可恢复
                             </small>
                           </span>
                           <button
@@ -2223,8 +2223,8 @@ export default function App() {
                           {removed.exams.map((record) => (
                             <div key={record.id}>
                               <span>
-                                {record.date} · {record.conclusion || '听力检查'} · 可恢复至{' '}
-                                {restoreDeadline(record.deleted_at)}
+                                {record.date} · {record.conclusion || '听力检查'} ·{' '}
+                                {restoreDeadline(record.deleted_at)} 前可恢复
                               </span>
                               <button
                                 className="button small"
@@ -2371,7 +2371,7 @@ export default function App() {
                                 {[record.brand, record.series, record.model]
                                   .filter(Boolean)
                                   .join(' · ')}{' '}
-                                · 可恢复至 {restoreDeadline(record.deleted_at)}
+                                · {restoreDeadline(record.deleted_at)} 前可恢复
                               </span>
                               <button
                                 className="button small"
@@ -2547,8 +2547,8 @@ export default function App() {
                           {removed.repairs.map((r) => (
                             <div key={r.id}>
                               <span>
-                                {r.occurred_date} · {r.problem} · 可恢复至{' '}
-                                {restoreDeadline(r.deleted_at)}
+                                {r.occurred_date} · {r.problem} · {restoreDeadline(r.deleted_at)}{' '}
+                                前可恢复
                               </span>
                               <button
                                 className="button small"
@@ -2583,8 +2583,8 @@ export default function App() {
                           {removed.followups.map((record) => (
                             <div key={record.id}>
                               <span>
-                                {record.due} · {record.type} · {record.note} · 可恢复至{' '}
-                                {restoreDeadline((record as any).deleted_at)}
+                                {record.due} · {record.type} · {record.note} ·{' '}
+                                {restoreDeadline((record as any).deleted_at)} 前可恢复
                               </span>
                               <button
                                 className="button small"
@@ -2667,8 +2667,8 @@ export default function App() {
                           {removed.attachments.map((a) => (
                             <div key={a.id}>
                               <span>
-                                {a.name} · {(a.size / 1024).toFixed(1)} KB · 可恢复至{' '}
-                                {restoreDeadline(a.deleted_at)}
+                                {a.name} · {(a.size / 1024).toFixed(1)} KB ·{' '}
+                                {restoreDeadline(a.deleted_at)} 前可恢复
                               </span>
                               <button
                                 className="button small"

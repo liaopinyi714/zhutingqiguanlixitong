@@ -14,7 +14,7 @@ import {
 import { AccountAvatar, avatarThumbnail } from './AccountAvatar';
 import { RequestOrder } from './requestOrder';
 import { refreshAfterWrite } from './refreshAfterWrite';
-import { BUSINESS_TIME_ZONE, DAY_MS, RETENTION_DAYS, timestamp } from '../shared/calendar';
+import { restoreDeadline } from './format';
 
 type Account = {
   email: string;
@@ -408,12 +408,6 @@ export function Accounts({
       saving(false);
     }
   }
-  function expiresAt(date: string) {
-    return new Date(timestamp(date).getTime() + RETENTION_DAYS * DAY_MS).toLocaleDateString(
-      'zh-CN',
-      { timeZone: BUSINESS_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit' },
-    );
-  }
   async function saveStore(event: React.FormEvent) {
     event.preventDefault();
     if (avatarBusy) return;
@@ -800,7 +794,7 @@ export function Accounts({
                 </span>
                 <div>
                   <strong>{store.name}</strong>
-                  <small>{expiresAt(store.deleted_at)} 前可恢复</small>
+                  <small>{restoreDeadline(store.deleted_at)} 前可恢复</small>
                 </div>
                 <button
                   className="button small"
@@ -824,7 +818,7 @@ export function Accounts({
                 </span>
                 <div>
                   <strong>{store.name}</strong>
-                  <small>{expiresAt(store.left_at)} 前可恢复加入</small>
+                  <small>{restoreDeadline(store.left_at)} 前可恢复加入</small>
                 </div>
                 <button
                   className="button small"

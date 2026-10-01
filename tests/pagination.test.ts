@@ -296,6 +296,37 @@ describe('游标列表与聚合', () => {
     } while (cursor);
     expect(ids).toEqual(Array.from({ length: 16 }, (_, i) => 'f' + String(i).padStart(2, '0')));
   });
+  it('保修关注规则包含过期、今天及第 90 天，其他筛选与摘要口径一致', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-09-30T16:00:00Z'));
+    customer('owner');
+    fitting('past', 'owner', 'demo-store', '2026-09-30');
+    fitting('today', 'owner', 'demo-store', '2026-10-01');
+    fitting('day90', 'owner', 'demo-store', '2026-12-30');
+    fitting('day91', 'owner', 'demo-store', '2026-12-31');
+    fitting('missing', 'owner');
+    fitting('removed', 'owner', 'demo-store', '2026-10-01');
+    db.prepare("UPDATE fittings SET deleted_at=CURRENT_TIMESTAMP WHERE id='removed'").run();
+    customer('removed-customer');
+    fitting('hidden', 'removed-customer', 'demo-store', '2026-10-01');
+    db.prepare(
+      "UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE id='removed-customer'",
+    ).run();
+    customer('foreign', 'other-store');
+    fitting('foreign', 'foreign', 'other-store', '2026-10-01');
+    for (const [filter, ids] of [
+      ['需关注', ['past', 'today', 'day90']],
+      ['90 天内到期', ['today', 'day90']],
+      ['已到期', ['past']],
+      ['保修中', ['today', 'day90', 'day91']],
+      ['未填写', ['missing']],
+      ['全部', ['past', 'today', 'day90', 'day91', 'missing']],
+    ] as const) {
+      const page = await read('/warranties?paged=1&filter=' + encodeURIComponent(filter));
+      expect(page.items.map((row: any) => row.id)).toEqual(ids);
+    }
+    expect((await read('/summary?detail=0')).warrantyAlerts).toBe(3);
+  });
   it('固定完成状态和今日日期的随访可以完整翻页', async () => {
     customer('owner');
     for (let i = 0; i < 5; i++) {

@@ -3,14 +3,15 @@ import { mkdirSync, readFileSync, writeFileSync, createReadStream, statSync } fr
 import { resolve, relative, isAbsolute, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import { readConfig, configErrors } from './production-config.mjs';
+import { readConfig, configErrors, productionBindings } from './production-config.mjs';
 const config = readConfig();
 const errors = configErrors(config);
 if (errors.length) throw new Error(errors.join('\n'));
 const remote = process.env.RCLONE_REMOTE || 'hearing-r2';
 if (!/^[a-zA-Z0-9_-]+$/.test(remote)) throw new Error('RCLONE_REMOTE 必须是 rclone 的远程配置名称');
 const root = resolve('backups', new Date().toISOString().replace(/[:.]/g, '-'));
-const bucket = config.r2_buckets.find((item) => item.binding === 'FILES').bucket_name;
+const { db: database, files } = productionBindings(config);
+const bucket = files.bucket_name;
 function run(command, args) {
   const result = spawnSync(command, args, { stdio: 'inherit', windowsHide: true });
   if (result.error || result.status !== 0)
@@ -43,9 +44,9 @@ run('rclone', [
 ]);
 const sql = readFileSync(join(root, 'database.sql'));
 const db = new DatabaseSync(':memory:');
-db.exec(sql.toString('utf8'));
 const manifest = [];
 try {
+  db.exec(sql.toString('utf8'));
   for (const row of db
     .prepare('SELECT id,object_key,size FROM attachments ORDER BY id')
     .iterate()) {
@@ -68,7 +69,7 @@ try {
       {
         format: 1,
         createdAt: new Date().toISOString(),
-        database: config.d1_databases[0].database_id,
+        database: database.database_id,
         bucket,
         sqlSha256: createHash('sha256').update(sql).digest('hex'),
         attachments: manifest,

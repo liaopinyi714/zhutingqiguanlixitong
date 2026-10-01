@@ -576,6 +576,39 @@ describe('演示 API', () => {
       ((await (await req('/devices')).json()) as any[]).some((row) => row.customer_id === 'demo-1'),
     ).toBe(false);
   });
+  it.each(['same-store', 'other-store'])(
+    '旧维修错误关联 %s 的设备不会进入查询或恢复',
+    async (scope) => {
+      const tenant = scope === 'same-store' ? 'demo-store' : 'other-store';
+      db.prepare(
+        "INSERT INTO customers(id,tenant_id,name,gender,birth_date,phone,source,status) VALUES('unrelated-customer',?,'无关客户','未填写','','','','待评估')",
+      ).run(tenant);
+      db.prepare(
+        "INSERT INTO fittings(id,tenant_id,customer_id,date,data) VALUES('unrelated-fitting',?,'unrelated-customer','2026-10-01','{}')",
+      ).run(tenant);
+      // Reproduce a legacy/imported inconsistent relationship; normal writes already reject it.
+      db.prepare(
+        "INSERT INTO repairs(id,tenant_id,customer_id,fitting_id,occurred_date,status,problem) VALUES('broken-repair','demo-store','demo-1','unrelated-fitting','2026-10-01','维修中','旧关系专用检索')",
+      ).run();
+      expect(await (await req('/search?q=' + encodeURIComponent('旧关系专用检索'))).json()).toEqual(
+        [],
+      );
+      expect(((await (await req('/customers/demo-1/detail')).json()) as any).repairs).toEqual([]);
+      expect(await (await req('/repairs')).json()).toEqual([]);
+      const sheets = (await (await req('/export/spreadsheet?kind=extended')).json()) as any;
+      expect(sheets.repairs).toEqual([]);
+      db.prepare("UPDATE repairs SET deleted_at=CURRENT_TIMESTAMP WHERE id='broken-repair'").run();
+      expect(((await (await req('/customers/demo-1/removed')).json()) as any).repairs).toEqual([]);
+      const before = auditCount();
+      expect((await req('/customers/demo-1/repairs/broken-repair/restore', 'POST')).status).toBe(
+        400,
+      );
+      expect(auditCount()).toBe(before);
+      expect(
+        db.prepare("SELECT deleted_at FROM repairs WHERE id='broken-repair'").get()!.deleted_at,
+      ).not.toBeNull();
+    },
+  );
   it('报告删除后无法下载，30 天内可恢复', async () => {
     const form = new FormData();
     form.append(

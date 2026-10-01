@@ -82,7 +82,7 @@ app.get('/api/search', async (c) => {
         (json_extract(f.data,'$.brand') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.series') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.model') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.serial') LIKE ? ESCAPE '!' OR json_extract(f.data,'$.notes') LIKE ? ESCAPE '!')) OR
       EXISTS (SELECT 1 FROM followups u WHERE u.customer_id=c.id AND u.tenant_id=c.tenant_id AND u.deleted_at IS NULL AND
         (u.type LIKE ? ESCAPE '!' OR u.note LIKE ? ESCAPE '!' OR u.result LIKE ? ESCAPE '!')) OR
-      EXISTS (SELECT 1 FROM repairs r JOIN fittings rf ON rf.id=r.fitting_id AND rf.deleted_at IS NULL
+      EXISTS (SELECT 1 FROM repairs r JOIN fittings rf ON rf.id=r.fitting_id AND rf.tenant_id=r.tenant_id AND rf.customer_id=r.customer_id AND rf.deleted_at IS NULL
         WHERE r.customer_id=c.id AND r.tenant_id=c.tenant_id AND r.deleted_at IS NULL AND
         (r.problem LIKE ? ESCAPE '!' OR r.findings LIKE ? ESCAPE '!' OR r.work_done LIKE ? ESCAPE '!' OR
          r.parts LIKE ? ESCAPE '!' OR r.notes LIKE ? ESCAPE '!' OR r.status LIKE ? ESCAPE '!'))
@@ -297,7 +297,7 @@ app.get('/api/customers/:id/detail', async (c) => {
     ),
   );
   const repairs = await c.env.DB.prepare(
-    `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
+    `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.customer_id=r.customer_id AND f.deleted_at IS NULL
      WHERE r.tenant_id=? AND r.customer_id=? AND r.deleted_at IS NULL ORDER BY r.occurred_date DESC,r.created_at DESC`,
   )
     .bind(t, k)
@@ -584,7 +584,7 @@ app.get('/api/customers/:id/removed', async (c) => {
       'SELECT id,name,size,created_at,deleted_at FROM attachments WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
     ).bind(tenant, customer, retentionCutoff()),
     c.env.DB.prepare(
-      `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.deleted_at IS NULL
+      `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.customer_id=r.customer_id AND f.deleted_at IS NULL
        WHERE r.tenant_id=? AND r.customer_id=? AND r.deleted_at IS NOT NULL AND r.deleted_at>? ORDER BY r.deleted_at DESC`,
     ).bind(tenant, customer, retentionCutoff()),
   ]);
@@ -663,7 +663,7 @@ for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
     if (!existing) return c.json({ error: '已删除记录不存在' }, 404);
     if (kind === 'repairs') {
       const fitting = await c.env.DB.prepare(
-        'SELECT f.id FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.deleted_at IS NULL WHERE r.id=? AND r.customer_id=? AND r.tenant_id=?',
+        'SELECT f.id FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.customer_id=r.customer_id AND f.deleted_at IS NULL WHERE r.id=? AND r.customer_id=? AND r.tenant_id=?',
       )
         .bind(record, customer, s.tenant_id)
         .first();

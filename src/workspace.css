@@ -594,6 +594,12 @@ textarea:focus-visible {
 .cf-shell .directory-toolbar .search {
   min-width: 240px;
 }
+.cf-shell .directory-filter-note {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
 .cf-shell .directory-create {
   display: flex;
   align-items: flex-end;

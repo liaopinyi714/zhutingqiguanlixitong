@@ -3,7 +3,11 @@ import { readFileSync, existsSync, mkdtempSync, writeFileSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve, dirname, basename } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { configErrors, retiredBuildVariables } from '../scripts/production-config.mjs';
+import {
+  configErrors,
+  productionBindings,
+  retiredBuildVariables,
+} from '../scripts/production-config.mjs';
 
 let directory: string | undefined;
 afterEach(() => {
@@ -19,6 +23,15 @@ describe('正式构建退役压测入口', () => {
   it('遗留变量不再触发导入且不发布为绑定；配置检查继续拒绝错误生产资源', () => {
     directory = mkdtempSync(join(tmpdir(), 'hearing-release-'));
     const template = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
+    // A second resource may precede DB/FILES; never configure it by array index.
+    const otherDatabase = {
+      binding: 'ARCHIVE',
+      database_id: '22222222-2222-2222-2222-222222222222',
+      database_name: 'archive',
+    };
+    const otherBucket = { binding: 'EXPORTS', bucket_name: 'archive-files' };
+    template.d1_databases.unshift(otherDatabase);
+    template.r2_buckets.unshift(otherBucket);
     for (const name of retiredBuildVariables) template.vars[name] = 'private-retired-value';
     writeFileSync(join(directory, 'wrangler.jsonc'), JSON.stringify(template));
     const result = spawnSync(process.execPath, [resolve('scripts/configure-ci.mjs')], {
@@ -41,6 +54,10 @@ describe('正式构建退役压测入口', () => {
     expect(result.stderr).not.toContain('private-retired-value');
     const config = JSON.parse(readFileSync(join(directory, 'wrangler.jsonc'), 'utf8'));
     expect(configErrors(config)).toEqual([]);
+    expect(config.d1_databases[0]).toEqual(otherDatabase);
+    expect(config.r2_buckets[0]).toEqual(otherBucket);
+    expect(productionBindings(config).db.database_id).toBe('11111111-1111-1111-1111-111111111111');
+    expect(productionBindings(config).files.bucket_name).toBe('hearing-care-production-private');
     // Execute the actual production checker against this generated temporary
     // configuration; never overwrite the repository's placeholders or use live IDs.
     const checked = spawnSync(process.execPath, [resolve('scripts/check-production.mjs')], {
@@ -66,5 +83,33 @@ describe('正式构建退役压测入口', () => {
     expect(Object.keys(manifest.scripts).filter((name) => name.startsWith('seed:'))).toEqual([]);
     for (const path of ['scripts/load-test-data.mjs', 'scripts/seed-load-test.mjs'])
       expect(existsSync(path)).toBe(false);
+  });
+  it.each([
+    ['d1_databases', 'DB'],
+    ['r2_buckets', 'FILES'],
+  ])('缺失、格式错误或重复的 %s 绑定会拒绝配置，而不是选择任意资源', (collection, binding) => {
+    const template = JSON.parse(readFileSync('wrangler.jsonc', 'utf8'));
+    for (const resources of [undefined, {}, [], [null], [{ binding }, { binding }]]) {
+      const config = { ...template, [collection]: resources };
+      expect(() => productionBindings(config)).toThrow(
+        `${collection} 必须包含且仅包含一个 ${binding} 绑定`,
+      );
+      expect(configErrors(config)).toContain(`${collection} 必须包含且仅包含一个 ${binding} 绑定`);
+    }
+  });
+  it('非 main 构建在读取或写入配置前停止', () => {
+    directory = mkdtempSync(join(tmpdir(), 'hearing-release-'));
+    const path = join(directory, 'wrangler.jsonc');
+    const original = readFileSync('wrangler.jsonc', 'utf8');
+    writeFileSync(path, original);
+    const result = spawnSync(process.execPath, [resolve('scripts/configure-ci.mjs')], {
+      cwd: directory,
+      encoding: 'utf8',
+      windowsHide: true,
+      env: { ...process.env, WORKERS_CI: '1', WORKERS_CI_BRANCH: 'feature-test' },
+    });
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain('main 分支');
+    expect(readFileSync(path, 'utf8')).toBe(original);
   });
 });

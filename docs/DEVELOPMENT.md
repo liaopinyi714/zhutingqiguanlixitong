@@ -29,7 +29,7 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 
 | 测试                                       | 验证内容                                                                    |
 | ------------------------------------------ | --------------------------------------------------------------------------- |
-| domain.test.ts / calendar.test.ts          | 曲线、平均值、角色、北京时间边界、出生日期和日期差                          |
+| domain.test.ts / calendar.test.ts          | 曲线、平均值、角色、北京时间边界、出生日期、日期差和精确恢复截止时刻        |
 | api.test.ts                                | SQLite 事务模拟、Demo 接口、关联记录、门店生命周期、附件和导出              |
 | production.test.ts                         | 空正式迁移链、真实生成的 RS256 签名/JWKS mock、JWT/名单/来源/门店隔离与恢复 |
 | client-api.test.ts / request-order.test.ts | 每标签页门店范围、注销及晚到结果                                            |
@@ -39,7 +39,7 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 | skeleton.test.tsx                          | 11 主页面/6 客户标签结构及听力编辑器骨架                                    |
 | pagination.test.ts / read-plan.test.tsx    | 游标边界、全店搜索、聚合、索引范围、按需读取计划和分页按钮                  |
 | account-resolution.test.ts                | 一次身份解析、首次引导、并发撤权和执行时权限复核                            |
-| load-test-cleanup.test.ts / production-release.test.ts | 退役虚构数据的准确清理、真实资料保护、旧变量失效与构建配置隔离       |
+| load-test-cleanup.test.ts / production-release.test.ts | 退役虚构数据清理、真实资料保护、旧变量失效、绑定顺序与非 main 构建保护 |
 
 退役压测数据仅在 `tests/fixtures/retired-load-data.mjs` 中作为内存回归夹具保留，没有命令行入口、文件生成或远程数据库能力，不被 Worker 或构建配置脚本导入。一次性 SQL 位于 `maintenance/`，必须由操作者按 [生产收尾](PRODUCTION-RELEASE.md) 执行，不进入正式迁移、部署和定时任务。
 
@@ -54,6 +54,8 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 - 增加业务写入先定义 Zod 校验，再在 SQL 中验证门店、客户及关联设备；不能采用客户端 body 的 tenant_id。
 - HTTP 路由必须在 installHttpBoundary 注册之后。拆分路由后维持原先客户范围中间件，不可因模块化丢失保护。
 - 所有值参数化；动态表名仅来自代码内固定白名单，不来自 URL 任意字符串。
+- 查询关联设备时同时匹配设备 ID、tenant_id 和 customer_id，不能因为正常写入已校验就省略读路径约束；历史错误关联也须保持隔离。
+- 配置/备份脚本使用 productionBindings 按 DB/FILES 名称定位唯一资源，不用 d1_databases[0] 或 r2_buckets[0] 推断业务资源。
 - 同页建档继续用一次 batch；写入与审计同批。普通客户业务使用 server/mutations.ts；把门店/成员/客户/设备约束放进执行的 SQL，RETURNING 为空视为冲突，不能无条件记录成功审计。文件操作维持补偿与失败重试关系，不声称跨 R2/D1 事务。
 - 前端计算导入 shared，不能导入服务端路由或校验模块。未知/空业务信息允许留空，不新增任意必填。
 - UI 维持白/灰和克制蓝色，现有样式顺序固定；优先修改对应模块，避免全局覆盖互相竞争。

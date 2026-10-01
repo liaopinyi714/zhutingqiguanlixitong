@@ -2,6 +2,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { age, daysUntil, today, timestamp } from '../shared/calendar';
 import { customerSchema } from '../server/domain';
 import { blankCurve } from '../shared/hearing';
+import { restoreDeadline } from '../src/format';
+import { retentionCutoff } from '../server/retention';
 
 afterEach(() => vi.useRealTimers());
 describe('共享业务日期', () => {
@@ -37,6 +39,17 @@ describe('共享业务日期', () => {
   it('UTC 数据库时间和带时区 ISO 时间表示同一时刻', () => {
     expect(timestamp('2026-09-30 02:00:00').getTime()).toBe(
       timestamp('2026-09-30T10:00:00+08:00').getTime(),
+    );
+  });
+  it.each([
+    ['2026-09-30 18:08:05', '2026/10/31 02:08:05'],
+    ['2026-10-01T02:08:05+08:00', '2026/10/31 02:08:05'],
+    ['2024-02-01 16:00:00', '2024/03/03 00:00:00'],
+  ])('恢复期限是删除后 30 天的北京时间，保留秒精度（%s）', (deleted, deadline) => {
+    expect(restoreDeadline(deleted)).toBe(deadline);
+    const expires = new Date(timestamp(deleted).getTime() + 30 * 86400000);
+    expect(retentionCutoff(expires)).toBe(
+      timestamp(deleted).toISOString().slice(0, 19).replace('T', ' '),
     );
   });
   it('新检查的不同曲线互不共享可变测点', () => {

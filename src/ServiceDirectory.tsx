@@ -6,6 +6,15 @@ import { PageNavigation } from './PageNavigation';
 import { RecordPicker } from './RecordPicker';
 import { today } from '../shared/calendar';
 
+const warrantyHints: Record<string, string> = {
+  需关注: '已过期或从今天起 90 天内到期的设备，含今天和第 90 天。按北京时间计算。',
+  '90 天内到期': '从今天起 90 天内到期的设备，含今天和第 90 天。按北京时间计算。',
+  已到期: '保修截止日期早于今天的设备。按北京时间计算。',
+  保修中: '保修截止日期为今天或之后的设备。按北京时间计算。',
+  未填写: '尚未填写保修截止日期的设备。',
+  全部: '本门店所有未删除的验配设备，包括未填写保修日期的设备。',
+};
+
 type Props = {
   kind: 'devices' | 'repairs' | 'warranties';
   scope: string;
@@ -139,6 +148,7 @@ export function ServiceDirectory({
               </button>
             )}
           </label>
+          {warrantyView && <p className="directory-filter-note muted">{warrantyHints[filter]}</p>}
         </div>
         <div className="directory-list">
           {loadError ||
