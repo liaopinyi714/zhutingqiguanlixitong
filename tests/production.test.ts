@@ -123,6 +123,41 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  it.runIf(!PERFORMANCE_DIAGNOSTICS)('正式请求默认关闭诊断，客户端和遗留变量不能开启', async () => {
+    const jwt = await token();
+    await req('/me', jwt);
+    env.PERFORMANCE_DIAGNOSTICS = 'true';
+    env.LOAD_TEST_CUSTOMERS = '10000';
+    const clock = vi.spyOn(performance, 'now');
+    try {
+      for (const path of [
+        '/config',
+        '/me',
+        '/summary',
+        '/customers',
+        '/followups',
+        '/devices',
+        '/repairs',
+        '/warranties',
+        '/accounts/stores',
+      ]) {
+        const response = await req(path + '?performanceDiagnostics=true', jwt, 'GET', undefined, {
+          'X-Performance-Diagnostics': 'true',
+        });
+        expect(response.status).toBe(200);
+        expect(response.headers.get('Server-Timing')).toBeNull();
+      }
+      const presence = await req('/accounts/presence', jwt, 'POST', {});
+      expect(presence.status).toBe(200);
+      expect(presence.headers.get('Server-Timing')).toBeNull();
+      const refused = await req('/me');
+      expect(refused.status).toBe(401);
+      expect(refused.headers.get('Server-Timing')).toBeNull();
+      expect(clock).not.toHaveBeenCalled();
+    } finally {
+      clock.mockRestore();
+    }
+  });
   describe.runIf(PERFORMANCE_DIAGNOSTICS)('启用诊断', () => {
     it('config 基线仅含 Worker 耗时，无 JWT 验证、D1 查询或身份信息', async () => {
       const prepare = vi.spyOn(env.DB, 'prepare');

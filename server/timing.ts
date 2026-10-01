@@ -1,6 +1,6 @@
-// Temporary diagnostics: switch off here after measuring, without changing
-// bindings, authentication, queries or database structure.
-export const PERFORMANCE_DIAGNOSTICS = true;
+// Maintenance only: disabled in normal production. Temporarily enable through
+// a reviewed code change when investigating latency; no runtime/public switch.
+export const PERFORMANCE_DIAGNOSTICS = false;
 
 // Only fixed names and numeric durations can reach the response header.
 const stages = [

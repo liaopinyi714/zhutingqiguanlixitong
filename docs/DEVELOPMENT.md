@@ -38,6 +38,10 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 | spreadsheet.test.ts                        | Excel 工作表内容、文本序列号、公式文本化与 OOXML 包                         |
 | skeleton.test.tsx                          | 11 主页面/6 客户标签结构及听力编辑器骨架                                    |
 | pagination.test.ts / read-plan.test.tsx    | 游标边界、全店搜索、聚合、索引范围、按需读取计划和分页按钮                  |
+| account-resolution.test.ts                | 一次身份解析、首次引导、并发撤权和执行时权限复核                            |
+| load-test-cleanup.test.ts / production-release.test.ts | 退役虚构数据的准确清理、真实资料保护、旧变量失效与构建配置隔离       |
+
+退役压测数据仅在 `tests/fixtures/retired-load-data.mjs` 中作为内存回归夹具保留，没有命令行入口、文件生成或远程数据库能力，不被 Worker 或构建配置脚本导入。一次性 SQL 位于 `maintenance/`，必须由操作者按 [生产收尾](PRODUCTION-RELEASE.md) 执行，不进入正式迁移、部署和定时任务。
 
 接口测试使用 Node 24 的内存 SQLite 模拟 D1 prepare/bind/first/all/batch，batch 显式事务回滚；附件用内存对象。它们验证 SQL 和应用逻辑，不模拟所有 D1 CPU/配额、Access 控制台配置或移动浏览器交互。
 

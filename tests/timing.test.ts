@@ -5,6 +5,15 @@ import { installHttpBoundary } from '../server/http';
 import type { AppContext } from '../server/types';
 
 describe('临时请求耗时', () => {
+  it('维护时显式启用仍可计时，无需开放公网开关或添加数据库查询', async () => {
+    const app = new Hono<AppContext>();
+    installHttpBoundary(app, true);
+    app.get('/api/config', (c) => c.json({ demo: false }));
+    const response = await app.request('/api/config', {}, { DEMO_MODE: 'false' } as any);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ demo: false });
+    expect(response.headers.get('Server-Timing')).toMatch(/^worker;dur=\d+\.\d{2}$/);
+  });
   it('关闭诊断时不读计时时钟或追加标头，原有边界和响应保持有效', async () => {
     const app = new Hono<AppContext>();
     installHttpBoundary(app, false);

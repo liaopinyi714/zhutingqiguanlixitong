@@ -1,10 +1,13 @@
 import { readFileSync } from 'node:fs';
+export const retiredBuildVariables = ['LOAD_TEST_CUSTOMERS', 'LOAD_TEST_STORE_ID'];
 export function readConfig() {
   // Keep this file valid JSON; the .jsonc name is the Wrangler convention.
   return JSON.parse(readFileSync('wrangler.jsonc', 'utf8').replace(/^\uFEFF/, ''));
 }
 export function configErrors(config) {
   const errors = [];
+  for (const name of retiredBuildVariables)
+    if (config.vars?.[name] !== undefined) errors.push(`移除已退役的压测变量 ${name}`);
   if (!/^[a-f0-9]{32}$/i.test(config.account_id || '')) errors.push('填写 Cloudflare Account ID');
   if (config.vars?.DEMO_MODE !== 'false') errors.push('正式环境 DEMO_MODE 必须为 false');
   if (!/^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/.test(config.vars?.ACCESS_TEAM_DOMAIN || ''))

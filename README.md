@@ -14,8 +14,8 @@
 | 理解表、字段、关联、删除恢复             | [数据模型](docs/DATA-MODEL.md)     |
 | 查询现有接口和请求示例                   | [API 契约](docs/API.md)            |
 | 理解分页、按需加载、统计和索引成本       | [数据加载](docs/DATA-LOADING.md)   |
-| 排查网络、认证与 D1 等待耗时             | [临时性能诊断](docs/PERFORMANCE-DIAGNOSTICS.md) |
-| 临时导入虚构客户、测试数据量与加载延迟   | [压测数据](docs/LOAD-TEST.md)       |
+| 排查网络、认证与 D1 等待耗时             | [维护诊断（默认关闭）](docs/PERFORMANCE-DIAGNOSTICS.md) |
+| 结束压测、清理虚构资料和构建开关         | [生产收尾](docs/PRODUCTION-RELEASE.md) |
 | 接手开发、测试、修改迁移、发布           | [开发与维护](docs/DEVELOPMENT.md)  |
 | 开通账户、管理门店、排查线上故障         | [运行维护](docs/OPERATIONS.md)     |
 | 理解权限边界及现有安全限制               | [安全说明](docs/SECURITY.md)       |
@@ -85,7 +85,7 @@ src/refreshAfterWrite.ts 保存成功与刷新失败的分离处理
 src/WorkspaceSkeletons.tsx 各业务页面的对应骨架
 server/index.ts        Worker 入口、客户业务路由和模块挂载
 server/http.ts         统一 HTTP 安全和权限边界
-server/timing.ts       临时请求阶段计时（仅响应头，无持久化日志）
+server/timing.ts       默认关闭的维护计时（仅响应头，无持久化日志）
 server/mutations.ts    写入时范围校验、状态冲突和事务审计
 server/attachments.ts  私有报告上传、补偿、删除恢复与下载
 server/auth.ts         Access JWT 与提供者名单校验
@@ -97,7 +97,8 @@ server/pagination.ts   有界参数、位置游标与分页响应
 server/retention.ts    定时清理
 migrations/            演示迁移链
 migrations-production/ 正式迁移链
-scripts/               配置、名单上传、备份、可选压测导入和文档检查
+scripts/               配置、名单上传、备份和文档检查
+maintenance/           一次性退役数据清理及只读核验（不自动执行）
 tests/                 日期、业务、权限、隔离、导出、导航和骨架回归
 docs/                  技术与运维文档
 ```
@@ -108,6 +109,6 @@ docs/                  技术与运维文档
 
 正式版要求 Access Allow 策略、正确 JWT 配置和运行时 `STAFF_ACCOUNTS` Secret。生产公网不接受 Demo 登录。首次操作使用 [网页部署步骤](docs/DEPLOYMENT-GUI.md)，账户和门店操作见 [运行维护](docs/OPERATIONS.md)。
 
-正式使用前可在 Cloudflare **构建变量**中临时设置 `LOAD_TEST_CUSTOMERS=10000`，迁移完成后自动导入选定门店的虚构客户和部分业务资料。默认关闭、不改变迁移链；完成后删除开关，步骤与免费额度说明见 [压测数据](docs/LOAD-TEST.md)。
+本次 1000/10000 客户压测已结束。正式构建没有压测导入脚本、seed 命令或自动写入虚构客户的行为；旧 `LOAD_TEST_CUSTOMERS` / `LOAD_TEST_STORE_ID` 构建变量失效，应从 Cloudflare 删除。生产 `Server-Timing` 默认关闭，只有经代码审查的维护改动可临时启用。线上虚构记录由操作者按 [生产收尾](docs/PRODUCTION-RELEASE.md) 一次性清理；代码推送不代表数据库已经清理。
 
 日常列表按服务端游标读取，统计由 D1 聚合；包含词语的 LIKE 搜索和精确聚合仍有随数据量增加的扫描成本，见 [数据加载](docs/DATA-LOADING.md)。没有写入冲突版本、自动备份或仪器导入。完整备份需要 SQL 与报告原件；Excel 和 JSON 下载均不能独立承担完整恢复。更换服务商可复用业务代码，但仍需适配数据库、对象存储和认证。听力图用于记录展示，不自动诊断或生成验配处方。

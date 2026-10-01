@@ -57,7 +57,7 @@ pnpm exec wrangler whoami
 3. 复制 **Database ID**。它与 Account ID 不是同一个值。
 4. 保持数据库为空；后面的迁移命令会建表。
 
-不要复用之前的 Demo 数据库，不要导入 `migrations/0002_demo_seed.sql`。本版本正式迁移目录为 `migrations-production/`，只包含结构和索引，没有演示资料。
+不要复用之前的 Demo 数据库，不要导入 `migrations/0002_demo_seed.sql`。本版本正式迁移目录为 `migrations-production/`，只包含结构和索引，没有演示资料。本次压测已经结束，正式构建没有自动导入入口；已有测试记录按 [生产收尾](PRODUCTION-RELEASE.md) 一次性清理，不删除或重新初始化数据库。
 
 ### 3.3 建立私有 R2 桶
 

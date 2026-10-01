@@ -1,6 +1,5 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { resolve, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+// Retired fixture: used only by in-memory regression tests, including the
+// one-time production cleanup. No CLI, filesystem output or remote executor.
 
 export const loadTestBatch = 'loadtest-20261001';
 export const seedTables = ['customers', 'fittings', 'exams', 'followups', 'repairs'];
@@ -263,40 +262,4 @@ export function seedCountSQL(options, start = 1, end = options.count) {
       .join(',') +
     ';'
   );
-}
-
-// Use the existing recovery/retention flow, including private report cleanup.
-export function seedCleanupSQL(options) {
-  const o = seedOptions(options);
-  return `UPDATE customers SET deleted_at=CURRENT_TIMESTAMP WHERE tenant_id=${quote(o.storeId)} AND id LIKE ${quote(`${o.prefix}c-%`)} AND deleted_at IS NULL;\n`;
-}
-
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  const args = process.argv.slice(2);
-  const value = (key) => args[args.indexOf(key) + 1];
-  if (!args.includes('--store-id')) {
-    console.log(
-      '生成离线 SQL：pnpm seed:generate --store-id 门店ID [--count 10000] [--date 2026-10-01]',
-    );
-  } else {
-    const o = seedOptions({
-      storeId: value('--store-id'),
-      count: args.includes('--count') ? Number(value('--count')) : 10000,
-      date: args.includes('--date') ? value('--date') : '2026-10-01',
-    });
-    const directory = resolve('work', 'load-test', Buffer.from(o.storeId).toString('hex'));
-    mkdirSync(directory, { recursive: true });
-    for (let start = 1; start <= o.count; start += 1000) {
-      const end = Math.min(o.count, start + 999);
-      writeFileSync(
-        join(directory, `${String(start).padStart(6, '0')}-${String(end).padStart(6, '0')}.sql`),
-        seedSQL(o, start, end).join('\n'),
-      );
-    }
-    writeFileSync(join(directory, 'verify.sql'), seedCountSQL(o));
-    writeFileSync(join(directory, 'cleanup.sql'), seedCleanupSQL(o));
-    console.log(
-      `已生成 ${o.count} 名虚构客户及关联资料；预计索引计入写入约 ${estimatedSeedWrites(seedCounts(1, o.count))} 行。文件位于 ${directory}。未连接或修改任何数据库。`,
-    );
-  }
 }
