@@ -15,6 +15,7 @@
 | 查询现有接口和请求示例                   | [API 契约](docs/API.md)            |
 | 理解分页、按需加载、统计和索引成本       | [数据加载](docs/DATA-LOADING.md)   |
 | 排查网络、认证与 D1 等待耗时             | [临时性能诊断](docs/PERFORMANCE-DIAGNOSTICS.md) |
+| 临时导入虚构客户、测试数据量与加载延迟   | [压测数据](docs/LOAD-TEST.md)       |
 | 接手开发、测试、修改迁移、发布           | [开发与维护](docs/DEVELOPMENT.md)  |
 | 开通账户、管理门店、排查线上故障         | [运行维护](docs/OPERATIONS.md)     |
 | 理解权限边界及现有安全限制               | [安全说明](docs/SECURITY.md)       |
@@ -96,7 +97,7 @@ server/pagination.ts   有界参数、位置游标与分页响应
 server/retention.ts    定时清理
 migrations/            演示迁移链
 migrations-production/ 正式迁移链
-scripts/               配置、名单上传、备份和文档检查
+scripts/               配置、名单上传、备份、可选压测导入和文档检查
 tests/                 日期、业务、权限、隔离、导出、导航和骨架回归
 docs/                  技术与运维文档
 ```
@@ -106,5 +107,7 @@ docs/                  技术与运维文档
 已有 GitHub → Workers Builds 配置的实例，在 `main` 更新后自动配置、检查、构建、应用未执行的正式迁移并发布。**Git 推送成功不等于生产部署成功**，应检查 Cloudflare Builds 的对应提交。第一长期版本包括正式迁移 0001–0008；构建会执行尚未应用的迁移。本次收尾未新增迁移、资源或变量，不需要重新建库。
 
 正式版要求 Access Allow 策略、正确 JWT 配置和运行时 `STAFF_ACCOUNTS` Secret。生产公网不接受 Demo 登录。首次操作使用 [网页部署步骤](docs/DEPLOYMENT-GUI.md)，账户和门店操作见 [运行维护](docs/OPERATIONS.md)。
+
+正式使用前可在 Cloudflare **构建变量**中临时设置 `LOAD_TEST_CUSTOMERS=10000`，迁移完成后自动导入选定门店的虚构客户和部分业务资料。默认关闭、不改变迁移链；完成后删除开关，步骤与免费额度说明见 [压测数据](docs/LOAD-TEST.md)。
 
 日常列表按服务端游标读取，统计由 D1 聚合；包含词语的 LIKE 搜索和精确聚合仍有随数据量增加的扫描成本，见 [数据加载](docs/DATA-LOADING.md)。没有写入冲突版本、自动备份或仪器导入。完整备份需要 SQL 与报告原件；Excel 和 JSON 下载均不能独立承担完整恢复。更换服务商可复用业务代码，但仍需适配数据库、对象存储和认证。听力图用于记录展示，不自动诊断或生成验配处方。
