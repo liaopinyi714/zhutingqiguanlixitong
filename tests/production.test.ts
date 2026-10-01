@@ -7,6 +7,8 @@ import { readStaffAccounts } from '../server/auth';
 import { purgeExpiredRecords } from '../server/retention';
 import { configErrors, readConfig } from '../scripts/production-config.mjs';
 import { PERFORMANCE_DIAGNOSTICS } from '../server/timing';
+import { buildListQuery } from '../server/read-model';
+import { encodeCursor } from '../server/pagination';
 
 let db: DatabaseSync,
   env: any,
@@ -231,6 +233,74 @@ describe('正式环境', () => {
         expect(prepare).not.toHaveBeenCalled();
       },
     );
+
+    it('列表主查询、游标续查及失败独立计时，不改变请求次数或泄露参数', async () => {
+      const jwt = await token();
+      await req('/me', jwt);
+      let clock = 0;
+      const timer = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+      let fail = false;
+      function timedStatement(sql: string, args: any[] = []): any {
+        const inner = statement(sql, args);
+        return {
+          bind: (...values: any[]) => timedStatement(sql, values),
+          first: async () => {
+            clock += 5;
+            return inner.first();
+          },
+          all: async () => {
+            clock += 5;
+            if (fail) throw new Error('private SQL parameter');
+            return inner.all();
+          },
+        };
+      }
+      env.DB.prepare = vi.fn(timedStatement);
+      try {
+        for (const path of [
+          '/customers',
+          '/customers/removed',
+          '/devices',
+          '/repairs',
+          '/followups',
+          '/warranties',
+        ]) {
+          env.DB.prepare.mockClear();
+          const response = await req(path + '?paged=1&limit=6', jwt);
+          expect(response.status).toBe(200);
+          expect(response.headers.get('Server-Timing')).toBe(
+            'worker;dur=10.00, access_jwt;dur=0.00, account_store;dur=5.00, list_d1;dur=5.00, account_resolve_d1;dur=5.00',
+          );
+          expect(await response.json()).toEqual({ items: [], nextCursor: null });
+          expect(env.DB.prepare).toHaveBeenCalledTimes(2);
+        }
+        const plan = buildListQuery('warranties', owner.tenantId, { paged: '1', limit: '6' });
+        const cursor = encodeCursor(plan.scope, ['2026-01-01', 'test-boundary']);
+        env.DB.prepare.mockClear();
+        const continuation = await req(
+          '/warranties?paged=1&limit=6&cursor=' + encodeURIComponent(cursor),
+          jwt,
+        );
+        expect(continuation.headers.get('Server-Timing')).toBe(
+          'worker;dur=15.00, access_jwt;dur=0.00, account_store;dur=5.00, list_d1;dur=10.00, account_resolve_d1;dur=5.00',
+        );
+        expect(env.DB.prepare).toHaveBeenCalledTimes(3);
+        fail = true;
+        const quiet = vi.spyOn(console, 'error').mockImplementation(() => {});
+        try {
+          const refused = await req('/followups?paged=1&limit=6', jwt);
+          expect(refused.status).toBe(500);
+          expect(refused.headers.get('Server-Timing')).toBe(
+            'worker;dur=10.00, access_jwt;dur=0.00, account_store;dur=5.00, list_d1;dur=5.00, account_resolve_d1;dur=5.00',
+          );
+          expect(await refused.json()).toEqual({ error: '服务暂时不可用，请稍后重试。' });
+        } finally {
+          quiet.mockRestore();
+        }
+      } finally {
+        timer.mockRestore();
+      }
+    });
 
     it('summary 查询失败保留计时，不向响应头暴露 SQL 或错误内容', async () => {
       const jwt = await token();

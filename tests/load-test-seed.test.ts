@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import {
   customerSchema,
   examSchema,
@@ -19,7 +19,12 @@ import {
   estimatedSeedWrites,
   seedTables,
 } from '../scripts/load-test-data.mjs';
-import { requestedCount, seedLoadTest, targetStoreSQL } from '../scripts/seed-load-test.mjs';
+import {
+  requestedCount,
+  seedLoadTest,
+  targetStoreSQL,
+  wranglerExecutor,
+} from '../scripts/seed-load-test.mjs';
 
 let db: DatabaseSync;
 const options = { storeId: 'load-store', count: 10000, date: '2026-10-01' };
@@ -315,5 +320,85 @@ describe('Cloudflare Builds seed workflow', () => {
     const repeated = await seedLoadTest({ env, config, execute, log });
     expect(repeated.importedChunks).toBe(0);
     expect(repeated.totals).toEqual(seedCounts(1, 2000));
+  });
+
+  it('resumes the already imported first 1000 rows despite file-import progress mixed with JSON', async () => {
+    seed(1, 1000);
+    let files = 0;
+    const paths: string[] = [],
+      messages: string[] = [];
+    const adapter = wranglerExecutor('wrangler.jsonc', (_command: string, args: string[]) => {
+      expect(args).toContain('--remote');
+      expect(args).toContain('--json');
+      if (args.includes('--file')) {
+        const path = args[args.indexOf('--file') + 1];
+        paths.push(path);
+        files++;
+        db.exec(readFileSync(path, 'utf8'));
+        return {
+          status: 0,
+          stdout:
+            '\u001b[32m│ Checking if file needs uploading\u001b[0m\n│ Uploading private-upload-url\n\n' +
+            JSON.stringify([{ success: true, results: [{ 'Rows written': 9685 }] }]),
+          stderr: '',
+        };
+      }
+      const rows = db.prepare(args[args.indexOf('--command') + 1]).all();
+      return { status: 0, stdout: JSON.stringify([{ success: true, results: rows }]), stderr: '' };
+    });
+    const result = await seedLoadTest({
+      env,
+      config,
+      execute: adapter,
+      log: (message: string) => messages.push(message),
+    });
+    expect(result.status).toBe('complete');
+    expect(result.importedChunks).toBe(1);
+    expect(result.totals).toEqual(seedCounts(1, 2000));
+    expect(files).toBe(1);
+    expect(paths.every((path) => !existsSync(path))).toBe(true);
+    expect(messages.join('\n')).not.toContain('private-upload-url');
+    expect((await seedLoadTest({ env, config, execute: adapter, log })).importedChunks).toBe(0);
+    expect(files).toBe(1);
+  });
+
+  it('does not report an import as complete merely because the process exited successfully', async () => {
+    const adapter = wranglerExecutor('wrangler.jsonc', (_command: string, args: string[]) => {
+      const rows = args.includes('--file')
+        ? []
+        : db.prepare(args[args.indexOf('--command') + 1]).all();
+      return {
+        status: 0,
+        stdout: args.includes('--file')
+          ? 'Uploading complete.\n'
+          : JSON.stringify([{ success: true, results: rows }]),
+        stderr: '',
+      };
+    });
+    await expect(seedLoadTest({ env, config, execute: adapter, log })).rejects.toThrow(
+      '未完整写入',
+    );
+    expect(db.prepare('SELECT COUNT(*) AS n FROM customers').get()?.n).toBe(0);
+  });
+
+  it('still rejects malformed SELECT output and failed file imports without exposing raw output', async () => {
+    const wrong = wranglerExecutor('wrangler.jsonc', () => ({
+      status: 0,
+      stdout: 'private malformed output',
+      stderr: '',
+    }));
+    await expect(wrong('SELECT 1')).rejects.toThrow('返回格式异常');
+    const failed = wranglerExecutor('wrangler.jsonc', () => ({
+      status: 1,
+      stdout: 'private account data',
+      stderr: "Your account has exceeded D1's free tier daily row write limit.",
+    }));
+    await expect(failed('SELECT 1;', true)).rejects.toThrow('当天免费额度');
+    const errored = wranglerExecutor('wrangler.jsonc', () => ({
+      status: 0,
+      stdout: JSON.stringify([{ success: false, results: [] }]),
+      stderr: '',
+    }));
+    await expect(errored('SELECT 1')).rejects.toThrow('未确认');
   });
 });

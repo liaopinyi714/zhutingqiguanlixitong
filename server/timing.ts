@@ -7,6 +7,7 @@ const stages = [
   'access_jwt',
   'account_store',
   'summary_d1',
+  'list_d1',
   'account_resolve_d1',
   'account_bootstrap_d1',
   'me_resolve_d1',

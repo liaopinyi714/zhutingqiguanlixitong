@@ -119,6 +119,17 @@ async function read(path: string) {
   return (await response.json()) as any;
 }
 
+it('较长导入编号可排除自身查重，仍隔离门店并限制参数长度', async () => {
+  const id = 'loadtest-20261001-' + 'a'.repeat(72) + '-c-000001';
+  customer(id, 'demo-store', '同名客户');
+  customer('same', 'demo-store', '同名客户');
+  customer('foreign', 'other-store', '同名客户');
+  const path =
+    '/customers/duplicates?name=' + encodeURIComponent('同名客户') + '&birthDate=&exclude=';
+  expect(await read(path + id)).toEqual([{ id: 'same', name: '同名客户' }]);
+  expect((await req(path + 'x'.repeat(161))).status).toBe(400);
+});
+
 describe('游标列表与聚合', () => {
   it('默认有界，页大小有上限，相同时间戳不重不漏，无深 OFFSET', async () => {
     for (let i = 0; i < 135; i++) customer('c' + String(i).padStart(4, '0'));

@@ -20,6 +20,7 @@ Server-Timing: worker;dur=85.00, access_jwt;dur=5.00, account_store;dur=30.00, s
 | `access_jwt`           | 应用内 Access 配置、JWT 声明/签名验证；公钥缓存未命中时也含现有 JWKS 请求等待；止于账户解析开始之前                   |
 | `account_store`        | 账户授权及资料、初始引导、门店及成员解析；含 `/me` 的下列 D1 阶段，也含失效默认门店的原有恢复流程                     |
 | `summary_d1`           | `/api/summary` 原有四条聚合 SQL 的一次 D1 batch 往返，两种 detail 参数均覆盖                                          |
+| `list_d1`              | 客户、回收站、设备、维修、随访、保修目录的现有分页 SQL；需要两段游标范围时累加两次查询等待                              |
 | `me_resolve_d1`        | `/api/me` 合并的个人资料、初始成员/门店状态和当前门店读取；首次引导后复读会累加                                       |
 | `account_resolve_d1`   | 其他请求同样的实时身份读取；仅门店列表接口返回本人全部有效门店                                                        |
 | `me_bootstrap_d1`      | `/api/me` 首次账户/门店/成员初始化的一个事务（仅实际需要时，至多五条固定语句）                                        |
@@ -55,6 +56,8 @@ Server-Timing: worker;dur=85.00, access_jwt;dur=5.00, account_store;dur=30.00, s
 
 `TTFB - worker` 只能作为未被应用计时覆盖的等待估算，不能精确拆出网络与 Access 各自花了多少时间。DNS、TCP、TLS 等另有浏览器 Timing 阶段，不要把整个请求总耗时当成 TTFB。Access 返回的登录跳转、拒绝响应或未进入 Worker 的请求不会有本项目的指标。
 
+列表请求也保留 `account_store` / `account_resolve_d1`，并用 `list_d1` 区分业务查询。`worker - account_store` 不是纯 SQL 时间；其中还包含其他业务处理、结果转换等。读取 `list_d1` 无额外 SQL、日志或业务数据暴露。
+
 Cloudflare Workers 出于安全原因使时钟仅随 I/O 推进。短阶段/纯计算可能显示 `0.00`，config 基线也可能为零；不意味着零 CPU 开销。不要加入人为等待或额外请求来制造非零值。这些指标不覆盖模块初始化、进入应用前的运行时调度、响应头的最终发送、后续流式文件传输或后台定时任务。[Cloudflare 计时限制](https://developers.cloudflare.com/workers/runtime-apis/performance/)
 
 ## 4. 关闭
@@ -86,3 +89,17 @@ Cloudflare Workers 出于安全原因使时钟仅随 I/O 推进。短阶段/纯�
 测试覆盖同 JWT 撤权、退出、删除/过期门店、墓碑、初始引导期间的并发撤权、一次查询路径、列表复用、无权显式范围、Cookie 恢复、活动写入的二次范围校验及主键执行计划。本地模拟批次只计算一次往返，避免把事务内的 SQL 条数误计为网络次数。本地 SQLite 执行计划不代表实际 D1 rows_read。
 
 参考 [D1 批处理说明](https://developers.cloudflare.com/d1/worker-api/d1-database/#batch)：一个调用内顺序执行语句并具有事务语义，用于降低多次网络往返；常规身份解析使用一条 SQL，以同时减少语句数和往返。
+
+## 6. 1000 名测试客户时的反馈
+
+2026-10-01 用户提供截图，TTFB 取浏览器的“正在等待服务器响应”项：
+
+| 请求 | TTFB | Worker | 账户解析 | TTFB 减 Worker |
+| --- | ---: | ---: | ---: | ---: |
+| config | 194.86 ms | 0 ms | 无 | 约 195 ms |
+| me | 378.83 ms | 183 ms | 183 ms | 约 196 ms |
+| followups | 741.50 ms | 543 ms | 185 ms | 约 199 ms |
+
+身份合并查询从原先约 550 ms 降到本次约 183–185 ms，符合减少两次往返的预期。这些是单次请求样本，不是并发吞吐测试，亦不能据此推断 10000 或 50000 名客户时的耗时。
+
+三个样本未被 Worker 覆盖的等待均约 195–199 ms，说明仍有稳定的外部等待，但不能单独区分网络、Access 与边缘调度。随访的 Worker 余量约 358 ms，当时还没有列表 D1 独立指标，不能把它直接认作 SQL 扫描耗时。修复导入后重新观察 `list_d1` 与 D1 rows_read、SQL 指标，再判断是否需要查询优化。

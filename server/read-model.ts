@@ -227,16 +227,20 @@ export function installReadRoutes(app: Hono<AppContext>) {
       try {
         const plan = buildListQuery(kind, c.get('session').tenant_id, c.req.query());
         const rows = (
-          await c.env.DB.prepare(plan.sql)
-            .bind(...plan.values)
-            .all()
+          await measureTiming(c.get('timings'), 'list_d1', () =>
+            c.env.DB.prepare(plan.sql)
+              .bind(...plan.values)
+              .all(),
+          )
         ).results;
         if (plan.continuation && rows.length < plan.params.limit + 1) {
           const next = plan.continuation;
           const extra = (
-            await c.env.DB.prepare(next.sql)
-              .bind(...next.values.slice(0, -1), plan.params.limit + 1 - rows.length)
-              .all()
+            await measureTiming(c.get('timings'), 'list_d1', () =>
+              c.env.DB.prepare(next.sql)
+                .bind(...next.values.slice(0, -1), plan.params.limit + 1 - rows.length)
+                .all(),
+            )
           ).results;
           rows.push(...extra);
         }
@@ -259,7 +263,9 @@ export function installReadRoutes(app: Hono<AppContext>) {
     const name = (c.req.query('name') || '').trim(),
       birthDate = c.req.query('birthDate') || '',
       exclude = c.req.query('exclude') || '';
-    if (name.length > 40 || !/^(\d{4}-\d{2}-\d{2})?$/.test(birthDate) || exclude.length > 64)
+    // Match the bounded identifier size accepted by list cursors, including
+    // deterministic test/import identifiers. Exclusion is still scoped to store.
+    if (name.length > 40 || !/^(\d{4}-\d{2}-\d{2})?$/.test(birthDate) || exclude.length > 160)
       return c.json({ error: '客户查询参数无效' }, 400);
     if (!name) return c.json([]);
     const rows = await c.env.DB.prepare(

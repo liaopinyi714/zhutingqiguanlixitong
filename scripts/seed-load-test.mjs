@@ -96,7 +96,7 @@ export async function seedLoadTest({
   return { status: 'complete', totals, importedChunks };
 }
 
-function wranglerExecutor(configPath) {
+export function wranglerExecutor(configPath, run = spawnSync) {
   return async (sql, file = false) => {
     let directory;
     try {
@@ -117,7 +117,7 @@ function wranglerExecutor(configPath) {
         writeFileSync(path, sql);
         args.push('--file', path);
       } else args.push('--command', sql);
-      const result = spawnSync(process.execPath, args, {
+      const result = run(process.execPath, args, {
         encoding: 'utf8',
         windowsHide: true,
         timeout: 120000,
@@ -134,6 +134,11 @@ function wranglerExecutor(configPath) {
           'D1 压测导入失败，请检查构建令牌 D1 Edit 权限、数据库连接或 Cloudflare D1 控制台。可安全重试；未输出令牌或账户资料',
         );
       }
+      // File import's spinner writes progress text directly to stdout even with
+      // --json. Its exit status is checked above; seedLoadTest then verifies all
+      // five table counts through a separate structured SELECT. Never parse or
+      // print the import transcript, nor infer success from its progress text.
+      if (file) return [];
       let response;
       try {
         response = JSON.parse(result.stdout);
