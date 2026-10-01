@@ -5,6 +5,7 @@ import { app } from '../server/index';
 import { purgeExpiredRecords } from '../server/retention';
 import { frequencies } from '../server/domain';
 import { makeSheets } from '../src/spreadsheetExport';
+import { PERFORMANCE_DIAGNOSTICS } from '../server/timing';
 let db: DatabaseSync, env: any, cookie: string;
 afterEach(() => db.close());
 function statement(sql: string, args: any[] = []): any {
@@ -90,6 +91,21 @@ beforeEach(async () => {
   cookie = login.headers.get('Set-Cookie')!.split(';')[0];
 });
 describe('演示 API', () => {
+  it.runIf(PERFORMANCE_DIAGNOSTICS)(
+    '本地演示会话不伪装成 Access/JWT 验证，me 查询也记录耗时',
+    async () => {
+      const response = await req('/me');
+      expect(response.status).toBe(200);
+      const header = response.headers.get('Server-Timing')!;
+      expect(header).toContain('worker;dur=');
+      expect(header).toContain('account_store;dur=');
+      expect(header).toContain('demo_session_d1;dur=');
+      expect(header).toContain('me_profile_d1;dur=');
+      expect(header).toContain('me_stores_d1;dur=');
+      expect(header).not.toContain('access_jwt');
+      expect(header).not.toContain('owner@');
+    },
+  );
   it('核心 Excel 只读取客户和验配两项，表格仍与业务导出中的核心表相同', async () => {
     const full = (await (await req('/export/spreadsheet')).json()) as any;
     const sizes: number[] = [];

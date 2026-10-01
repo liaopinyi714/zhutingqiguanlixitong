@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import { z } from 'zod';
+import { measureTiming, type RequestTimings } from './timing';
 
 export type AuthEnv = {
   DEMO_MODE?: string;
@@ -86,40 +87,48 @@ export async function accessSession(
   request: Request,
   env: AuthEnv,
   lookup?: (email: string) => Promise<Session>,
+  timings?: RequestTimings,
 ): Promise<Session> {
-  const domain = env.ACCESS_TEAM_DOMAIN || '';
-  const audience = env.ACCESS_AUD || '';
-  if (
-    !/^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/.test(domain) ||
-    !audience ||
-    audience.includes('REPLACE')
-  )
-    throw new AuthError('员工登录尚未配置，请联系管理员', 503);
-  const staff = readStaffAccounts(env.STAFF_ACCOUNTS);
-  const token = request.headers.get('Cf-Access-Jwt-Assertion');
-  if (!token) throw new AuthError('登录已过期，请重新验证员工身份', 401);
-  const issuer = `https://${domain}`;
-  let keys = keySets.get(issuer);
-  if (!keys) {
-    keys = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`), { timeoutDuration: 5000 });
-    if (keySets.size >= 4) keySets.clear();
-    keySets.set(issuer, keys);
-  }
-  let email: string;
-  try {
-    const { payload } = await jwtVerify(token, keys, {
-      issuer,
-      audience,
-      algorithms: ['RS256'],
-      requiredClaims: ['exp', 'iat', 'sub', 'email', 'type'],
-      clockTolerance: 5,
-    });
-    if (payload.type !== 'app' || typeof payload.email !== 'string')
-      throw new Error('Invalid identity');
-    email = payload.email.toLowerCase();
-  } catch {
-    throw new AuthError('无法验证登录身份，请重新登录', 401);
-  }
+  // End identity verification before account lookup: these are sibling stages,
+  // so D1 work is not also counted as JWT verification.
+  const { staff, email } = await measureTiming(timings, 'access_jwt', async () => {
+    const domain = env.ACCESS_TEAM_DOMAIN || '';
+    const audience = env.ACCESS_AUD || '';
+    if (
+      !/^[a-z0-9][a-z0-9-]*\.cloudflareaccess\.com$/.test(domain) ||
+      !audience ||
+      audience.includes('REPLACE')
+    )
+      throw new AuthError('员工登录尚未配置，请联系管理员', 503);
+    const staff = readStaffAccounts(env.STAFF_ACCOUNTS);
+    const token = request.headers.get('Cf-Access-Jwt-Assertion');
+    if (!token) throw new AuthError('登录已过期，请重新验证员工身份', 401);
+    const issuer = `https://${domain}`;
+    let keys = keySets.get(issuer);
+    if (!keys) {
+      keys = createRemoteJWKSet(new URL(`${issuer}/cdn-cgi/access/certs`), {
+        timeoutDuration: 5000,
+      });
+      if (keySets.size >= 4) keySets.clear();
+      keySets.set(issuer, keys);
+    }
+    let email: string;
+    try {
+      const { payload } = await jwtVerify(token, keys, {
+        issuer,
+        audience,
+        algorithms: ['RS256'],
+        requiredClaims: ['exp', 'iat', 'sub', 'email', 'type'],
+        clockTolerance: 5,
+      });
+      if (payload.type !== 'app' || typeof payload.email !== 'string')
+        throw new Error('Invalid identity');
+      email = payload.email.toLowerCase();
+    } catch {
+      throw new AuthError('无法验证登录身份，请重新登录', 401);
+    }
+    return { staff, email };
+  });
   if (lookup) return lookup(email);
   const account = staff.find((entry) => entry.email === email);
   if (!account || account.role !== '店主')

@@ -5,6 +5,7 @@ import { AuthError, isLocalDemo, readStaffAccounts, type AuthEnv, type Session }
 import { validAvatar } from './avatar';
 import { retentionCutoff } from './retention';
 import { activeStoreWrite, auditAfterWrite, commitWrite, WriteConflictError } from './mutations';
+import { measureTiming, type RequestTimings } from './timing';
 
 type Env = AuthEnv & { DB: D1Database };
 type Account = {
@@ -56,67 +57,73 @@ export function configuredAccounts(env: AuthEnv, demo: boolean): Account[] {
     }));
 }
 
-async function accountProfile(env: Env, email: string, demo: boolean) {
+async function accountProfile(env: Env, email: string, demo: boolean, timings?: RequestTimings) {
   const config = configuredAccounts(env, demo);
   const configured = config.find((a) => a.email === email);
   // A database row, membership or valid Access JWT cannot provision an identity.
   if (!configured) throw new AuthError('此账户未由系统提供者授权，请联系系统提供者', 403);
-  let saved = await env.DB.prepare('SELECT * FROM accounts WHERE email=?')
-    .bind(email)
-    .first<Account>();
+  let saved = await measureTiming(timings, 'me_profile_d1', () =>
+    env.DB.prepare('SELECT * FROM accounts WHERE email=?').bind(email).first<Account>(),
+  );
   if (!saved) {
-    await env.DB.prepare(
-      "INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'config')",
-    )
-      .bind(email, configured.tenant_id, configured.name, configured.store_name)
-      .run();
-    saved = await env.DB.prepare('SELECT * FROM accounts WHERE email=?')
-      .bind(email)
-      .first<Account>();
+    await measureTiming(timings, 'me_bootstrap_d1', () =>
+      env.DB.prepare(
+        "INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source) VALUES(?,?,?,?,1,'config')",
+      )
+        .bind(email, configured.tenant_id, configured.name, configured.store_name)
+        .run(),
+    );
+    saved = await measureTiming(timings, 'me_profile_d1', () =>
+      env.DB.prepare('SELECT * FROM accounts WHERE email=?').bind(email).first<Account>(),
+    );
   }
   // Bootstrap initial store memberships only once. Disabled and voluntarily left
   // memberships remain as tombstones, so the secret cannot silently re-add them.
   if (configured.tenant_id) {
-    const member = await env.DB.prepare(
-      'SELECT email FROM store_memberships WHERE email=? AND tenant_id=?',
-    )
-      .bind(email, configured.tenant_id)
-      .first();
+    const member = await measureTiming(timings, 'me_membership_d1', () =>
+      env.DB.prepare('SELECT email FROM store_memberships WHERE email=? AND tenant_id=?')
+        .bind(email, configured.tenant_id)
+        .first(),
+    );
     const store = member
       ? null
-      : await env.DB.prepare('SELECT deleted_at,abandoned_at FROM stores WHERE id=?')
-          .bind(configured.tenant_id)
-          .first<{ deleted_at: string | null; abandoned_at: string | null }>();
+      : await measureTiming(timings, 'me_store_d1', () =>
+          env.DB.prepare('SELECT deleted_at,abandoned_at FROM stores WHERE id=?')
+            .bind(configured.tenant_id)
+            .first<{ deleted_at: string | null; abandoned_at: string | null }>(),
+        );
     if (
       !member &&
       !store?.deleted_at &&
       (!store?.abandoned_at || store.abandoned_at > retentionCutoff())
     ) {
       const peers = config.filter((a) => a.tenant_id === configured.tenant_id);
-      await env.DB.batch([
-        env.DB.prepare('INSERT OR IGNORE INTO stores(id,name) VALUES(?,?)').bind(
-          configured.tenant_id,
-          configured.store_name,
-        ),
-        // A statement per peer can exceed D1 Free's 50-query request limit.
-        // json_each keeps bootstrap at four statements regardless of roster size.
-        env.DB.prepare(
-          `INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source)
+      await measureTiming(timings, 'me_bootstrap_d1', () =>
+        env.DB.batch([
+          env.DB.prepare('INSERT OR IGNORE INTO stores(id,name) VALUES(?,?)').bind(
+            configured.tenant_id,
+            configured.store_name,
+          ),
+          // A statement per peer can exceed D1 Free's 50-query request limit.
+          // json_each keeps bootstrap at four statements regardless of roster size.
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO accounts(email,tenant_id,name,store_name,enabled,source)
            SELECT json_extract(value,'$.email'),json_extract(value,'$.tenant_id'),
              json_extract(value,'$.name'),json_extract(value,'$.store_name'),1,'config'
            FROM json_each(?)`,
-        ).bind(JSON.stringify(peers)),
-        env.DB.prepare(
-          `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
+          ).bind(JSON.stringify(peers)),
+          env.DB.prepare(
+            `INSERT OR IGNORE INTO store_memberships(email,tenant_id,name,enabled,source)
            SELECT json_extract(p.value,'$.email'),json_extract(p.value,'$.tenant_id'),
              json_extract(p.value,'$.name'),1,'config' FROM json_each(?) p
            JOIN stores t ON t.id=json_extract(p.value,'$.tenant_id') WHERE t.deleted_at IS NULL
              AND (t.abandoned_at IS NULL OR t.abandoned_at>datetime('now','-30 days'))`,
-        ).bind(JSON.stringify(peers)),
-        env.DB.prepare(
-          "UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL AND abandoned_at>datetime('now','-30 days')",
-        ).bind(configured.tenant_id),
-      ]);
+          ).bind(JSON.stringify(peers)),
+          env.DB.prepare(
+            "UPDATE stores SET abandoned_at=NULL WHERE id=? AND deleted_at IS NULL AND abandoned_at>datetime('now','-30 days')",
+          ).bind(configured.tenant_id),
+        ]),
+      );
     }
   }
   return {
@@ -125,16 +132,22 @@ async function accountProfile(env: Env, email: string, demo: boolean) {
   };
 }
 
-async function storesForAccount(env: Env, email: string): Promise<Store[]> {
+async function storesForAccount(
+  env: Env,
+  email: string,
+  timings?: RequestTimings,
+): Promise<Store[]> {
   const rows = (
-    await env.DB.prepare(
-      `SELECT m.tenant_id id,s.name,m.enabled,m.source
+    await measureTiming(timings, 'me_stores_d1', () =>
+      env.DB.prepare(
+        `SELECT m.tenant_id id,s.name,m.enabled,m.source
      FROM store_memberships m JOIN stores s ON s.id=m.tenant_id
      WHERE m.email=? AND m.enabled=1 AND s.deleted_at IS NULL AND (s.abandoned_at IS NULL OR s.abandoned_at>?)
      ORDER BY s.created_at,s.name`,
+      )
+        .bind(email, retentionCutoff())
+        .all<Store>(),
     )
-      .bind(email, retentionCutoff())
-      .all<Store>()
   ).results;
   return rows;
 }
@@ -144,9 +157,10 @@ export async function resolveAccount(
   email: string,
   demo = false,
   selectedStore?: string,
+  timings?: RequestTimings,
 ): Promise<Session> {
-  const { account, configured } = await accountProfile(env, email, demo);
-  const stores = await storesForAccount(env, email);
+  const { account, configured } = await accountProfile(env, email, demo, timings);
+  const stores = await storesForAccount(env, email, timings);
   const store =
     selectedStore === ''
       ? undefined

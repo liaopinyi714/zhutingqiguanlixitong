@@ -5,9 +5,13 @@ import { accessSession, AuthError, isLocalDemo } from './auth';
 import { resolveAccount } from './accounts';
 import type { AppContext } from './types';
 import { WriteConflictError } from './mutations';
+import { PERFORMANCE_DIAGNOSTICS, RequestTimings, measureTiming } from './timing';
 
 // Register before every route. Ordering is part of the authentication boundary.
-export function installHttpBoundary(app: Hono<AppContext>) {
+export function installHttpBoundary(
+  app: Hono<AppContext>,
+  performanceDiagnostics = PERFORMANCE_DIAGNOSTICS,
+) {
   app.onError((err, c) => {
     if (err instanceof SyntaxError) return c.json({ error: '请求内容格式不正确' }, 400);
     if (err instanceof AuthError) return c.json({ error: err.message }, err.status);
@@ -15,6 +19,16 @@ export function installHttpBoundary(app: Hono<AppContext>) {
     // Do not log query values, customer content, tokens or attachment names.
     console.error('request_failed', { path: c.req.routePath, kind: err.name });
     return c.json({ error: '服务暂时不可用，请稍后重试。' }, 500);
+  });
+  // Outer boundary includes auth, queries, response construction and handled
+  // failures. It stops before network delivery or a streamed response body.
+  app.use('/api/*', async (c, next) => {
+    if (!performanceDiagnostics) return next();
+    const timings = new RequestTimings();
+    c.set('timings', timings);
+    await next();
+    const existing = c.res.headers.get('Server-Timing');
+    c.header('Server-Timing', [existing, timings.header()].filter(Boolean).join(', '));
   });
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
@@ -57,10 +71,43 @@ export function installHttpBoundary(app: Hono<AppContext>) {
       c.req.path === '/api/me' ||
       c.req.path === '/api/accounts/stores' ||
       /^\/api\/accounts\/stores\/[^/]+\/switch$/.test(c.req.path);
+    const timings = c.get('timings');
+    // /me's database work happens here, before the route returns the session.
+    const meTimings = c.req.path === '/api/me' ? timings : undefined;
     if (!demo) {
-      const lookup = async (email: string) => {
+      const lookup = (email: string) =>
+        measureTiming(timings, 'account_store', async () => {
+          try {
+            return await resolveAccount(c.env, email, false, selectedStore, meTimings);
+          } catch (error) {
+            if (
+              explicitStore !== undefined ||
+              !selectedStore ||
+              !mayRecover ||
+              !(error instanceof AuthError)
+            )
+              throw error;
+            deleteCookie(c, 'hearing_store', { path: '/' });
+            return resolveAccount(c.env, email, false, undefined, meTimings);
+          }
+        });
+      c.set('session', await accessSession(c.req.raw, c.env, lookup, timings));
+      return next();
+    }
+    const token = getCookie(c, 'hearing_session');
+    const s = token
+      ? await measureTiming(timings, 'demo_session_d1', () =>
+          c.env.DB.prepare('SELECT role,tenant_id FROM sessions WHERE token=? AND expires_at>?')
+            .bind(token, Date.now())
+            .first<{ role: string; tenant_id: string }>(),
+        )
+      : null;
+    if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
+    c.set(
+      'session',
+      await measureTiming(timings, 'account_store', async () => {
         try {
-          return await resolveAccount(c.env, email, false, selectedStore);
+          return await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore, meTimings);
         } catch (error) {
           if (
             explicitStore !== undefined ||
@@ -70,32 +117,10 @@ export function installHttpBoundary(app: Hono<AppContext>) {
           )
             throw error;
           deleteCookie(c, 'hearing_store', { path: '/' });
-          return resolveAccount(c.env, email);
+          return resolveAccount(c.env, 'owner@demo.invalid', true, undefined, meTimings);
         }
-      };
-      c.set('session', await accessSession(c.req.raw, c.env, lookup));
-      return next();
-    }
-    const token = getCookie(c, 'hearing_session');
-    const s = token
-      ? await c.env.DB.prepare('SELECT role,tenant_id FROM sessions WHERE token=? AND expires_at>?')
-          .bind(token, Date.now())
-          .first<{ role: string; tenant_id: string }>()
-      : null;
-    if (!s || s.role !== '店主') return c.json({ error: '请先登录工作台' }, 401);
-    try {
-      c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true, selectedStore));
-    } catch (error) {
-      if (
-        explicitStore !== undefined ||
-        !selectedStore ||
-        !mayRecover ||
-        !(error instanceof AuthError)
-      )
-        throw error;
-      deleteCookie(c, 'hearing_store', { path: '/' });
-      c.set('session', await resolveAccount(c.env, 'owner@demo.invalid', true));
-    }
+      }),
+    );
     await next();
   });
   app.use('/api/*', async (c, next) =>

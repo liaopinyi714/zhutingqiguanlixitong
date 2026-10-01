@@ -6,6 +6,7 @@ import { app } from '../server/index';
 import { readStaffAccounts } from '../server/auth';
 import { purgeExpiredRecords } from '../server/retention';
 import { configErrors, readConfig } from '../scripts/production-config.mjs';
+import { PERFORMANCE_DIAGNOSTICS } from '../server/timing';
 
 let db: DatabaseSync,
   env: any,
@@ -120,6 +121,130 @@ async function req(
   );
 }
 describe('正式环境', () => {
+  describe.runIf(PERFORMANCE_DIAGNOSTICS)('启用诊断', () => {
+    it('config 基线仅含 Worker 耗时，无 JWT 验证、D1 查询或身份信息', async () => {
+      const prepare = vi.spyOn(env.DB, 'prepare');
+      const batch = vi.spyOn(env.DB, 'batch');
+      const response = await req('/config');
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ demo: false });
+      expect(response.headers.get('Server-Timing')).toMatch(/^worker;dur=\d+\.\d{2}$/);
+      expect(response.headers.get('Cache-Control')).toBe('no-store');
+      expect(prepare).not.toHaveBeenCalled();
+      expect(batch).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+    });
+
+    it.each(['0', '1'])(
+      'JWT、账户解析、me 主查询与 summary D1 独立计时（detail=%s）',
+      async (detail) => {
+        const jwt = await token();
+        let clock = 0;
+        const timer = vi.spyOn(performance, 'now').mockImplementation(() => clock);
+        const fetchKeys = fetch;
+        vi.stubGlobal(
+          'fetch',
+          vi.fn(async (...args: Parameters<typeof fetch>) => {
+            clock += 7;
+            return fetchKeys(...args);
+          }),
+        );
+        function timedStatement(sql: string, args: any[] = []): any {
+          const inner = statement(sql, args);
+          return {
+            bind: (...values: any[]) => timedStatement(sql, values),
+            first: async () => {
+              clock += 5;
+              return inner.first();
+            },
+            run: async () => {
+              clock += 5;
+              return inner.run();
+            },
+            all: async () => {
+              clock += 5;
+              return inner.all();
+            },
+          };
+        }
+        env.DB.prepare = vi.fn(timedStatement);
+        const batch = vi.spyOn(env.DB, 'batch');
+        try {
+          const first = await req('/me', jwt);
+          expect(first.status).toBe(200);
+          expect(first.headers.get('Server-Timing')).toBe(
+            'worker;dur=57.00, access_jwt;dur=7.00, account_store;dur=50.00, me_profile_d1;dur=10.00, me_membership_d1;dur=5.00, me_store_d1;dur=5.00, me_stores_d1;dur=5.00, me_bootstrap_d1;dur=25.00',
+          );
+          expect(env.DB.prepare).toHaveBeenCalledTimes(10);
+          expect(batch).toHaveBeenCalledTimes(1);
+          expect(batch.mock.calls[0][0]).toHaveLength(4);
+          const profile = (await first.json()) as any;
+          expect(profile.email).toBe(owner.email);
+          expect(profile.tenant_id).toBe(owner.tenantId);
+          expect(profile).not.toHaveProperty('timings');
+
+          const warm = await req('/me', jwt);
+          expect(warm.headers.get('Server-Timing')).toBe(
+            'worker;dur=15.00, access_jwt;dur=0.00, account_store;dur=15.00, me_profile_d1;dur=5.00, me_membership_d1;dur=5.00, me_stores_d1;dur=5.00',
+          );
+          expect(env.DB.prepare).toHaveBeenCalledTimes(13);
+          expect(batch).toHaveBeenCalledTimes(1);
+          expect(fetch).toHaveBeenCalledTimes(1);
+          expect(await warm.json()).toEqual(profile);
+
+          const summary = await req('/summary?detail=' + detail, jwt);
+          expect(summary.status).toBe(200);
+          expect(summary.headers.get('Server-Timing')).toBe(
+            'worker;dur=35.00, access_jwt;dur=0.00, account_store;dur=15.00, summary_d1;dur=20.00',
+          );
+          expect(env.DB.prepare).toHaveBeenCalledTimes(20);
+          expect(batch).toHaveBeenCalledTimes(2);
+          expect(batch.mock.calls[1][0]).toHaveLength(4);
+          expect(await summary.json()).toMatchObject({ customers: 0, devices: 0, repairs: 0 });
+        } finally {
+          timer.mockRestore();
+        }
+      },
+    );
+
+    it.each([undefined, 'invalid-private-jwt'])(
+      '登录失败仍记录 Worker 和应用验证耗时，不解析账户（%s）',
+      async (jwt) => {
+        const prepare = vi.spyOn(env.DB, 'prepare');
+        const response = await req('/me', jwt);
+        expect(response.status).toBe(401);
+        const header = response.headers.get('Server-Timing')!;
+        expect(header).toMatch(/^worker;dur=\d+\.\d{2}, access_jwt;dur=\d+\.\d{2}$/);
+        expect(header).not.toContain('private');
+        expect(header).not.toContain(owner.email);
+        expect(prepare).not.toHaveBeenCalled();
+      },
+    );
+
+    it('summary 查询失败保留计时，不向响应头暴露 SQL 或错误内容', async () => {
+      const jwt = await token();
+      await req('/me', jwt);
+      env.DB.batch = async () => {
+        throw new Error('private query WHERE email=owner@example.com');
+      };
+      const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        const response = await req('/summary', jwt);
+        expect(response.status).toBe(500);
+        expect(response.headers.get('Server-Timing')).toMatch(
+          /^worker;dur=\d+\.\d{2}, access_jwt;dur=\d+\.\d{2}, account_store;dur=\d+\.\d{2}, summary_d1;dur=\d+\.\d{2}$/,
+        );
+        expect(await response.json()).toEqual({ error: '服务暂时不可用，请稍后重试。' });
+        expect(log).toHaveBeenCalledTimes(1); // Existing sanitized error handler only.
+        expect(log.mock.calls[0]).toEqual([
+          'request_failed',
+          { path: '/api/summary', kind: 'Error' },
+        ]);
+      } finally {
+        log.mockRestore();
+      }
+    });
+  });
   it.each(['invite', 'rename'])('写入前成员被停用时拒绝门店管理操作：%s', async (operation) => {
     env.STAFF_ACCOUNTS = JSON.stringify([
       owner,

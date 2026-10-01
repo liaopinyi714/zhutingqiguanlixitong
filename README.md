@@ -14,6 +14,7 @@
 | 理解表、字段、关联、删除恢复             | [数据模型](docs/DATA-MODEL.md)     |
 | 查询现有接口和请求示例                   | [API 契约](docs/API.md)            |
 | 理解分页、按需加载、统计和索引成本       | [数据加载](docs/DATA-LOADING.md)   |
+| 排查网络、认证与 D1 等待耗时             | [临时性能诊断](docs/PERFORMANCE-DIAGNOSTICS.md) |
 | 接手开发、测试、修改迁移、发布           | [开发与维护](docs/DEVELOPMENT.md)  |
 | 开通账户、管理门店、排查线上故障         | [运行维护](docs/OPERATIONS.md)     |
 | 理解权限边界及现有安全限制               | [安全说明](docs/SECURITY.md)       |
@@ -83,6 +84,7 @@ src/refreshAfterWrite.ts 保存成功与刷新失败的分离处理
 src/WorkspaceSkeletons.tsx 各业务页面的对应骨架
 server/index.ts        Worker 入口、客户业务路由和模块挂载
 server/http.ts         统一 HTTP 安全和权限边界
+server/timing.ts       临时请求阶段计时（仅响应头，无持久化日志）
 server/mutations.ts    写入时范围校验、状态冲突和事务审计
 server/attachments.ts  私有报告上传、补偿、删除恢复与下载
 server/auth.ts         Access JWT 与提供者名单校验

@@ -3,6 +3,7 @@ import type { AppContext } from './types';
 import { today } from '../shared/calendar';
 import { retentionCutoff } from './retention';
 import { decodeCursor, listInput, ListInputError, pageResult } from './pagination';
+import { measureTiming } from './timing';
 
 export const repairRank = "CASE r.status WHEN '待送修' THEN 2 WHEN '维修中' THEN 1 ELSE 0 END";
 export const warrantyKey = "COALESCE(NULLIF(json_extract(f.data,'$.warranty'),''),'9999')";
@@ -292,24 +293,31 @@ async function summary(c: Context<AppContext>) {
          ELSE '80 岁及以上' END AS age_bucket, COUNT(*) AS count
        FROM customers WHERE tenant_id=? AND deleted_at IS NULL GROUP BY status,source,age_bucket`
     : 'SELECT status,COUNT(*) AS count FROM customers WHERE tenant_id=? AND deleted_at IS NULL GROUP BY status';
-  const [customers, followups, devices, repairs] = await c.env.DB.batch([
-    c.env.DB.prepare(customerSql).bind(...(detailed ? [...Array(6).fill(date), tenant] : [tenant])),
-    c.env.DB.prepare(
-      `SELECT f.completed,${detailed ? 'f.type,' : ''}COUNT(*) AS count,
+  const [customers, followups, devices, repairs] = await measureTiming(
+    c.get('timings'),
+    'summary_d1',
+    () =>
+      c.env.DB.batch([
+        c.env.DB.prepare(customerSql).bind(
+          ...(detailed ? [...Array(6).fill(date), tenant] : [tenant]),
+        ),
+        c.env.DB.prepare(
+          `SELECT f.completed,${detailed ? 'f.type,' : ''}COUNT(*) AS count,
       SUM(f.completed=0 AND f.due=?) AS today_count,SUM(f.completed=0 AND f.due<?) AS overdue_count
       FROM followups f ${activeCustomer} WHERE f.tenant_id=? AND f.deleted_at IS NULL GROUP BY f.completed${detailed ? ',f.type' : ''}`,
-    ).bind(date, date, tenant),
-    c.env.DB.prepare(
-      `SELECT COUNT(*) AS count,SUM(${warrantyKey}<=date(?,'+90 days')) AS alerts
+        ).bind(date, date, tenant),
+        c.env.DB.prepare(
+          `SELECT COUNT(*) AS count,SUM(${warrantyKey}<=date(?,'+90 days')) AS alerts
       FROM fittings f ${activeCustomer} WHERE f.tenant_id=? AND f.deleted_at IS NULL`,
-    ).bind(date, tenant),
-    c.env.DB.prepare(
-      `SELECT COUNT(*) AS count FROM repairs r
+        ).bind(date, tenant),
+        c.env.DB.prepare(
+          `SELECT COUNT(*) AS count FROM repairs r
       JOIN customers c ON c.id=r.customer_id AND c.tenant_id=r.tenant_id AND c.deleted_at IS NULL
       JOIN fittings f ON f.id=r.fitting_id AND f.customer_id=r.customer_id AND f.tenant_id=r.tenant_id AND f.deleted_at IS NULL
       WHERE r.tenant_id=? AND r.deleted_at IS NULL`,
-    ).bind(tenant),
-  ]);
+        ).bind(tenant),
+      ]),
+  );
   const status: Record<string, number> = Object.create(null),
     sources: Record<string, number> = Object.create(null),
     ages: Record<string, number> = Object.create(null),
