@@ -1,6 +1,6 @@
 # 项目架构
 
-核对日期：2026-10-01。本文说明实际实现；未实现的能力单列在最后。
+核对日期：2026-10-11。本文说明实际实现；未实现的能力单列在最后。
 
 ## 1. 运行结构
 
@@ -36,6 +36,7 @@ flowchart LR
 | `src/api.ts`                                  | 同源请求与当前标签页门店绑定                 | Cookie 仅是选择，不是授权                          |
 | `src/readPlan.ts` / `useWorkspaceData.ts`     | 页面读取需求与聚合摘要                       | 不预读无关目录；保持门店范围                       |
 | `src/useReadResource.ts` / `RecordPicker.tsx` | 当前页、位置游标、检索候选项与请求顺序       | 切店/退出后不得写回旧结果                          |
+| `src/readRequest.ts`                          | 可替换读取的取消与请求身份                 | 取消后仍拒绝迟到结果，不用于写入重试               |
 | `src/useWorkspaceRoute.ts` / `workspace.ts`   | Hash 路由与展示规则                          | 地址不包含客户姓名和搜索文本                       |
 | `src/ui.tsx` / `WorkspaceSkeletons.tsx`       | 通用展示与对应页面骨架                       | 保留页面结构，仅替换未知数据                       |
 | `server/mutations.ts`                         | 写入时门店/成员/客户检查、状态冲突和事务审计 | SQL 必须带范围条件及 RETURNING，零变更不记成功审计 |
@@ -49,6 +50,7 @@ flowchart LR
 | `server/domain.ts`                            | Zod 输入验证                                 | 写入前验证；听力计算复用 shared                    |
 | `server/index.ts`                             | 客户、业务、附件路由及 Worker 入口           | 所有读写限定已验证门店                             |
 | `server/read-model.ts` / `pagination.ts`      | SQL 列表、筛选、游标与聚合                   | LIMIT 有上限；保留父记录隔离                       |
+| `server/customer-reads.ts`                    | 单客详情/恢复记录，一次批处理读取           | 各子查询均验证有效父客户；不接管写入前置校验       |
 | `server/exports.ts`                           | JSON 与离线表格快照                          | 当前门店；Excel 排除软删除                         |
 | `server/retention.ts`                         | 30 天保留与附件清理                          | 先删文件，成功后删目录；失败可重试                 |
 
@@ -90,7 +92,7 @@ Hash 地址例如 `#page=customers&customer=<id>&tab=<标签>&record=<id>`，可
 
 生日、验配、保修、预约为无时区的 `YYYY-MM-DD`；“今天”统一按 `Asia/Shanghai`。D1 `CURRENT_TIMESTAMP` 为 UTC，界面转换为北京时间。恢复期限是实际经过的 30 × 24 小时；Cron 在北京时间 02:00。过期即拒绝恢复，物理清理可能因日调度、积压或失败晚于截止时刻。
 
-附件先写 R2，再写目录和审计；D1 失败或上传期间客户/门店资格变化时尝试补偿删除对象。D1/R2 没有跨服务原子事务，补偿也可能失败。完整备份须停写、复制 SQL 和报告并核对，见 [备份恢复](BACKUP.md)。
+附件先写 R2，再写目录和审计。D1 报错不代表事务未提交：失败后核查相同附件 ID/对象键的目录，仅在确认不存在时尝试补偿删除对象；已提交或核查失败时保留文件并返回原错误，避免响应中断导致已保存的报告被误删。D1/R2 没有跨服务原子事务，补偿可能失败或留下待核对对象，不自动重发上传。完整备份须停写、复制 SQL 和报告并核对，见 [备份恢复](BACKUP.md)。
 
 ## 6. 样式和构建
 

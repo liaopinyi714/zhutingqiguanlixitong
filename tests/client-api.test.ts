@@ -68,3 +68,63 @@ it('保留分页和单客错误的状态码，供游标重置和档案不存在�
     expect(error.status).toBe(status);
   }
 });
+
+it('过时的读取可取消，取消后不重试，也不影响后续写入', async () => {
+  const fetcher = vi
+    .fn()
+    .mockImplementationOnce(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener('abort', () => reject(options.signal.reason));
+        }),
+    )
+    .mockResolvedValue(Response.json({ ok: true }));
+  vi.stubGlobal('fetch', fetcher);
+  const { api } = await import('../src/api');
+  const controller = new AbortController();
+  const pending = api('/customers?paged=1', 'GET', undefined, controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  controller.abort();
+  await rejected;
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(fetcher.mock.calls[0][1].signal).toBe(controller.signal);
+
+  await api('/customers', 'POST', { name: '测试' });
+  expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(fetcher.mock.calls[1][1].signal).toBeUndefined();
+});
+
+it('取消后迟到的身份正文不能更新当前门店范围', async () => {
+  let finish!: (value: unknown) => void;
+  let parsing!: () => void;
+  const started = new Promise<void>((resolve) => {
+    parsing = resolve;
+  });
+  const body = new Promise((resolve) => {
+    finish = resolve;
+  });
+  const fetcher = vi
+    .fn()
+    .mockResolvedValueOnce(Response.json({ tenant_id: 'store-a' }))
+    .mockResolvedValueOnce({
+      type: 'basic',
+      ok: true,
+      headers: new Headers({ 'Content-Type': 'application/json' }),
+      json: () => {
+        parsing();
+        return body;
+      },
+    })
+    .mockResolvedValue(Response.json({ ok: true }));
+  vi.stubGlobal('fetch', fetcher);
+  const { api } = await import('../src/api');
+  await api('/me');
+  const controller = new AbortController();
+  const pending = api('/me', 'GET', undefined, controller.signal);
+  await started;
+  controller.abort();
+  finish({ tenant_id: 'outdated-store' });
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  await api('/customers?paged=1');
+  expect(fetcher.mock.calls[2][1].headers['X-Hearing-Store']).toBe('store-a');
+});

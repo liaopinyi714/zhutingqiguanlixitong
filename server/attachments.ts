@@ -55,7 +55,19 @@ attachmentRoutes.post('/customers/:id/attachments', async (c) => {
       c.req.param('id'),
     );
   } catch (e) {
-    await c.env.FILES.delete(key);
+    // A transport error can arrive after D1 committed the directory entry.
+    // Compensate only when D1 confirms no entry; uncertainty must not erase a
+    // committed report. Keep the original failure if verification/cleanup fails.
+    try {
+      const saved = await c.env.DB.prepare(
+        'SELECT id FROM attachments WHERE id=? AND tenant_id=? AND customer_id=? AND object_key=?',
+      )
+        .bind(k, s.tenant_id, c.req.param('id'), key)
+        .first();
+      if (!saved) await c.env.FILES.delete(key);
+    } catch {
+      // Preserve the object for reconciliation when D1/R2 is available again.
+    }
     throw e;
   }
   return c.json({ id: k }, 201);

@@ -23,7 +23,7 @@
 | 查看历史变更与验证结果                   | [更新记录](CHANGELOG.md)           |
 | 核对第一长期版本及兼容维护约定           | [长期版本](docs/STABLE-V1.md)      |
 
-文档以当前源码为准，维护核对日期为 **2026-10-01**。Cloudflare 的界面、额度和价格以各文档链接的官方说明及账户控制台为准。
+文档以当前源码为准，本次维护核对日期为 **2026-10-11**。Cloudflare 的界面、额度和价格以各文档链接的官方说明及账户控制台为准。
 
 ## 当前功能
 
@@ -34,7 +34,7 @@
 - 随访预约、逾期、完成结果；客户及服务统计，已过期与未来 90 天保修提醒。
 - 私有 PDF/JPG/PNG 报告上传下载，单文件 10 MB；客户和业务记录删除恢复，保留 30 天。
 - 核心 Excel 两张客户表（已验配/未验配），业务 Excel 另加最新听力、验配、维修、随访分表；保留姓名、编号和文本型电话/序列号。
-- JSON 门店业务导出；完整 SQL/报告备份工具。
+- JSON 门店业务导出；完整 SQL/报告备份工具及已有备份的离线完整性复核。
 - 独立账户、个人头像、自行创建/切换/更名/删除/退出门店、添加已有授权店主、成员启停与近似在线状态。
 - 当前页真实分区加载、对应业务布局的骨架、移动端适配和减少动态效果设置。
 - 客户/设备/维修/随访/保修/回收站游标分页；候选项按需搜索；D1 聚合统计。
@@ -78,6 +78,7 @@ src/ServiceDirectory.tsx 设备、维修和保修目录
 src/api.ts             每个浏览器标签页的请求门店绑定
 src/readPlan.ts        页面按需读取计划
 src/useReadResource.ts 当前页、游标、重试及晚到结果控制
+src/readRequest.ts     可替换读取的取消与请求身份
 src/useWorkspaceData.ts 页面资源与统计摘要
 src/RecordPicker.tsx   可检索和分页的客户/设备候选项
 src/ui.tsx             通用展示、统计和加载组件
@@ -92,7 +93,8 @@ server/auth.ts         Access JWT 与提供者名单校验
 server/accounts.ts     独立账户与门店成员关系
 server/account-resolution.ts 单次 D1 身份/门店解析与首次资料引导
 server/exports.ts      JSON/Excel 数据快照接口
-server/read-model.ts   门店列表、客户详情入口和聚合统计
+server/read-model.ts   门店列表、单客基本资料入口和聚合统计
+server/customer-reads.ts 单客详情与恢复记录的受保护批量读取
 server/pagination.ts   有界参数、位置游标与分页响应
 server/retention.ts    定时清理
 migrations/            演示迁移链

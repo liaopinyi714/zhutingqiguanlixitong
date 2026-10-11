@@ -16,6 +16,7 @@ import { installHttpBoundary } from './http';
 import { exportRoutes } from './exports';
 import { attachmentRoutes } from './attachments';
 import { installReadRoutes } from './read-model';
+import { installCustomerReadRoutes } from './customer-reads';
 import type { Env, AppContext } from './types';
 import {
   activeCustomerWrite,
@@ -61,6 +62,7 @@ app.post('/api/logout', async (c) => {
 });
 app.route('/api/accounts', accountRoutes);
 installReadRoutes(app);
+installCustomerReadRoutes(app);
 const mapCustomer = (r: any) => ({ ...r, birthDate: r.birth_date, contactPhone: r.contact_phone });
 app.get('/api/search', async (c) => {
   const query = (c.req.query('q') || '').trim();
@@ -285,32 +287,6 @@ app.use('/api/customers/:id/*', async (c, next) => {
     .first();
   if (!r) return c.json({ error: '档案不存在' }, 404);
   await next();
-});
-app.get('/api/customers/:id/detail', async (c) => {
-  const t = c.get('session').tenant_id,
-    k = c.req.param('id');
-  const result = await c.env.DB.batch(
-    ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table) =>
-      c.env.DB.prepare(
-        `SELECT * FROM ${table} WHERE tenant_id=? AND customer_id=? ${['exams', 'fittings', 'followups', 'attachments'].includes(table) ? 'AND deleted_at IS NULL' : ''} ORDER BY ${table === 'followups' ? 'due' : ['exams', 'fittings'].includes(table) ? 'date DESC, created_at' : 'created_at'} DESC`,
-      ).bind(t, k),
-    ),
-  );
-  const repairs = await c.env.DB.prepare(
-    `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.customer_id=r.customer_id AND f.deleted_at IS NULL
-     WHERE r.tenant_id=? AND r.customer_id=? AND r.deleted_at IS NULL ORDER BY r.occurred_date DESC,r.created_at DESC`,
-  )
-    .bind(t, k)
-    .all();
-  return c.json({
-    ...Object.fromEntries(
-      ['exams', 'fittings', 'followups', 'attachments', 'audit'].map((table, i) => [
-        table,
-        result[i].results.map((r: any) => (r.data ? { ...r, ...JSON.parse(r.data) } : r)),
-      ]),
-    ),
-    repairs: repairs.results,
-  });
 });
 app.put('/api/customers/:id/profile', async (c) => {
   const p = customerSchema.safeParse(await c.req.json());
@@ -566,35 +542,6 @@ app.put('/api/customers/:id/followups/:recordId', async (c) => {
     customer,
   );
   return c.json({ ok: true });
-});
-app.get('/api/customers/:id/removed', async (c) => {
-  const tenant = c.get('session').tenant_id,
-    customer = c.req.param('id');
-  const [exams, fittings, followups, attachments, repairs] = await c.env.DB.batch([
-    c.env.DB.prepare(
-      'SELECT id,date,data,deleted_at FROM exams WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
-    ).bind(tenant, customer, retentionCutoff()),
-    c.env.DB.prepare(
-      'SELECT id,date,data,deleted_at FROM fittings WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
-    ).bind(tenant, customer, retentionCutoff()),
-    c.env.DB.prepare(
-      'SELECT * FROM followups WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
-    ).bind(tenant, customer, retentionCutoff()),
-    c.env.DB.prepare(
-      'SELECT id,name,size,created_at,deleted_at FROM attachments WHERE tenant_id=? AND customer_id=? AND deleted_at IS NOT NULL AND deleted_at>? ORDER BY deleted_at DESC',
-    ).bind(tenant, customer, retentionCutoff()),
-    c.env.DB.prepare(
-      `SELECT r.* FROM repairs r JOIN fittings f ON f.id=r.fitting_id AND f.tenant_id=r.tenant_id AND f.customer_id=r.customer_id AND f.deleted_at IS NULL
-       WHERE r.tenant_id=? AND r.customer_id=? AND r.deleted_at IS NOT NULL AND r.deleted_at>? ORDER BY r.deleted_at DESC`,
-    ).bind(tenant, customer, retentionCutoff()),
-  ]);
-  return c.json({
-    exams: exams.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
-    fittings: fittings.results.map((r: any) => ({ ...r, ...JSON.parse(r.data) })),
-    followups: followups.results,
-    attachments: attachments.results,
-    repairs: repairs.results,
-  });
 });
 for (const kind of ['exams', 'fittings', 'followups', 'repairs'] as const) {
   app.delete(`/api/customers/:id/${kind}/:recordId`, async (c) => {

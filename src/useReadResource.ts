@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
+import { ReadRequest } from './readRequest';
 
 export function useDebounced<T>(value: T, delay = 180) {
   const [settled, setSettled] = useState(value);
@@ -15,7 +16,7 @@ export function useReadResource<T>(path: string | null, scope: string) {
   const key = path ? scope + ':' + path : '';
   const liveKey = useRef(key);
   liveKey.current = key;
-  const sequence = useRef(0);
+  const request = useRef(new ReadRequest());
   const [state, setState] = useState<{
     key: string;
     data?: T;
@@ -27,7 +28,8 @@ export function useReadResource<T>(path: string | null, scope: string) {
   }>({ key: '', loading: false, error: '', cursor: null, history: [] });
   async function load(cursor: string | null = null, history: (string | null)[] = []) {
     if (!path || liveKey.current !== key) return;
-    const version = ++sequence.current;
+    const pending = request.current.begin();
+    const current = () => liveKey.current === key && pending.current();
     setState((previous) => ({
       ...previous,
       key,
@@ -38,20 +40,26 @@ export function useReadResource<T>(path: string | null, scope: string) {
       history,
     }));
     try {
-      const data = (await api(path + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''))) as T;
-      if (liveKey.current === key && version === sequence.current)
-        setState({ key, data, loading: false, error: '', cursor, history });
+      const data = (await api(
+        path +
+          (cursor ? (path.includes('?') ? '&' : '?') + 'cursor=' + encodeURIComponent(cursor) : ''),
+        'GET',
+        undefined,
+        pending.signal,
+      )) as T;
+      if (current()) setState({ key, data, loading: false, error: '', cursor, history });
     } catch (error) {
+      // Navigation, filtering and a newer refresh retire this read without a visible error.
+      if (!current()) return;
       const status = error instanceof ApiError ? error.status : undefined;
-      if (liveKey.current === key && version === sequence.current)
-        setState((previous) => ({
-          ...previous,
-          data: status && [401, 403, 404].includes(status) ? undefined : previous.data,
-          key,
-          loading: false,
-          error: (error as Error).message,
-          status,
-        }));
+      setState((previous) => ({
+        ...previous,
+        data: status && [401, 403, 404].includes(status) ? undefined : previous.data,
+        key,
+        loading: false,
+        error: (error as Error).message,
+        status,
+      }));
       throw error;
     }
   }
@@ -59,7 +67,7 @@ export function useReadResource<T>(path: string | null, scope: string) {
     setState({ key, loading: !!path, error: '', cursor: null, history: [] });
     if (path) void load().catch(() => {});
     return () => {
-      sequence.current++;
+      request.current.cancel();
     };
   }, [key]);
   const matches = !!key && state.key === key;

@@ -16,6 +16,7 @@
     "db:production": "pnpm check:production && wrangler d1 migrations apply DB --config wrangler.jsonc --remote",
     "staff:upload": "node scripts/upload-staff.mjs",
     "backup": "node scripts/backup.mjs",
+    "backup:verify": "node scripts/verify-backup.mjs",
     "build": "tsc --noEmit && vite build",
     "build:cloudflare": "node scripts/configure-ci.mjs && pnpm check && wrangler d1 migrations apply DB --config wrangler.jsonc --remote",
     "test": "vitest run",

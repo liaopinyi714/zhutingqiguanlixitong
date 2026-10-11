@@ -10,13 +10,14 @@ export class ApiError extends Error {
   }
 }
 
-export async function api(path: string, method = 'GET', data?: unknown) {
+export async function api(path: string, method = 'GET', data?: unknown, signal?: AbortSignal) {
   if (path === '/logout') sessionVersion++;
   const version = sessionVersion;
   const personal = ['/config', '/login', '/logout'].includes(path);
   const switching = /^\/accounts\/stores\/[^/]+\/switch$/.test(path);
   const response = await fetch('/api' + path, {
     method,
+    signal,
     headers: {
       'X-Requested-With': 'hearing-care',
       ...(requestStore !== undefined && !personal && !switching
@@ -33,6 +34,7 @@ export async function api(path: string, method = 'GET', data?: unknown) {
   )
     throw new Error('登录可能已过期。请先保存未提交的内容，再刷新页面重新登录。');
   const result: any = await response.json();
+  signal?.throwIfAborted();
   if (!response.ok) throw new ApiError(result.error || '请求失败', response.status);
   if (path === '/me' && version === sessionVersion) requestStore = result.tenant_id;
   if (path === '/logout') requestStore = undefined;

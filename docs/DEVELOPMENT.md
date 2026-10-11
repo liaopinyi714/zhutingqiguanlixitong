@@ -1,6 +1,6 @@
 # 开发、测试与发布维护
 
-核对日期：2026-10-01。仓库根目录有 package.json；原 Codex 工作区使用 app 子目录只是本地路径差异。
+核对日期：2026-10-11。仓库根目录有 package.json；原 Codex 工作区使用 app 子目录只是本地路径差异。
 
 ## 1. 环境和日常命令
 
@@ -20,6 +20,7 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 | pnpm db:production    | 真实云端正式迁移，需先备份并核对绑定                             |
 | pnpm staff:upload     | 从忽略的 config/staff.local.json 上传运行时 Secret               |
 | pnpm backup           | 真实 D1 SQL 与 R2 文件复制/核对，需 Wrangler/rclone 与停写       |
+| pnpm backup:verify 目录 | 已有备份的本地只读哈希与大小复核；不连接云端、不执行 SQL         |
 | pnpm deploy           | 检查正式配置、构建、发布；**不自动应用迁移**                     |
 | pnpm build:cloudflare | 构建环境配置 → check → 远程正式迁移；之后另有 Deploy command     |
 
@@ -33,6 +34,10 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 | api.test.ts                                | SQLite 事务模拟、Demo 接口、关联记录、门店生命周期、附件和导出              |
 | production.test.ts                         | 空正式迁移链、真实生成的 RS256 签名/JWKS mock、JWT/名单/来源/门店隔离与恢复 |
 | client-api.test.ts / request-order.test.ts | 每标签页门店范围、注销及晚到结果                                            |
+| read-request.test.ts                       | 过时读取取消、迟到响应、独立资源及重新挂载                                  |
+| customer-reads.test.ts                     | 单客批处理次数、父客户/门店隔离、历史关系、字段排序及撤权                   |
+| attachment-compensation.test.ts            | D1 响应丢失后保留已提交报告、失败核查和补偿删除异常                         |
+| backup.test.ts                             | 新备份还原/外键验证、离线 CLI、损坏/缺失检测及本地路径隔离                 |
 | refresh-after-write.test.ts                | 已确认保存后的读取成功/失败处理，不重发写入                                 |
 | navigation.test.ts                         | Hash 路由、记录定位与关联跳转                                               |
 | spreadsheet.test.ts                        | Excel 工作表内容、文本序列号、公式文本化与 OOXML 包                         |
@@ -52,11 +57,11 @@ Node.js 24.x、pnpm 11.19.0；锁文件提交版本固定依赖。首次安装�
 - 服务端确认保存后关闭新增表单，再通过 refreshAfterWrite 读取最新数据；读取失败提示已保存，不让用户误以为要重新提交。请求响应丢失时先查询核实，不能自动重发。
 - 页面静态结构尽早显示，动态区域独立 loading/ready/error；不能增加人为等待让骨架看似渐进。对应骨架复用布局，优先真实组件，错误显示重试。
 - 增加业务写入先定义 Zod 校验，再在 SQL 中验证门店、客户及关联设备；不能采用客户端 body 的 tenant_id。
-- HTTP 路由必须在 installHttpBoundary 注册之后。拆分路由后维持原先客户范围中间件，不可因模块化丢失保护。
+- HTTP 路由必须在 installHttpBoundary 注册之后。写入/附件路由继续经过有效客户中间件；customer-reads 在同一 batch 内检查父客户，且每条子查询再次约束父客户和门店，不可因模块化丢失保护。
 - 所有值参数化；动态表名仅来自代码内固定白名单，不来自 URL 任意字符串。
 - 查询关联设备时同时匹配设备 ID、tenant_id 和 customer_id，不能因为正常写入已校验就省略读路径约束；历史错误关联也须保持隔离。
 - 配置/备份脚本使用 productionBindings 按 DB/FILES 名称定位唯一资源，不用 d1_databases[0] 或 r2_buckets[0] 推断业务资源。
-- 同页建档继续用一次 batch；写入与审计同批。普通客户业务使用 server/mutations.ts；把门店/成员/客户/设备约束放进执行的 SQL，RETURNING 为空视为冲突，不能无条件记录成功审计。文件操作维持补偿与失败重试关系，不声称跨 R2/D1 事务。
+- 同页建档继续用一次 batch；写入与审计同批。普通客户业务使用 server/mutations.ts；把门店/成员/客户/设备约束放进执行的 SQL，RETURNING 为空视为冲突，不能无条件记录成功审计。D1 写入报错后不能直接删除 R2 文件，先核查是否已提交；核查也失败时保留对象和原错误，不声称跨 R2/D1 事务。
 - 前端计算导入 shared，不能导入服务端路由或校验模块。未知/空业务信息允许留空，不新增任意必填。
 - UI 维持白/灰和克制蓝色，现有样式顺序固定；优先修改对应模块，避免全局覆盖互相竞争。
 - 30 天期限常量在 shared/calendar.ts；SQL 中仍有对应的 -30 days 条件。改变期限必须同时修改 SQL、Cron测试、界面、备份说明，不能只改常量。
